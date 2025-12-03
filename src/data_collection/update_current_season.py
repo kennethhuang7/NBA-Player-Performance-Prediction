@@ -30,6 +30,92 @@ def safe_str(val):
         return None
     return str(val)
 
+def parse_minutes(minutes_str):
+    if pd.isna(minutes_str) or minutes_str == '' or minutes_str == 'None':
+        return None
+    try:
+        if ':' in str(minutes_str):
+            parts = str(minutes_str).split(':')
+            mins = int(parts[0])
+            secs = int(parts[1])
+            return round(mins + (secs / 60.0), 2)
+        else:
+            return float(minutes_str)
+    except:
+        return None
+
+def add_missing_player(player_id):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        rate_limit(0.5)
+        
+        player_info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
+        info_df = player_info.get_data_frames()[0]
+        
+        if len(info_df) > 0:
+            info = info_df.iloc[0]
+            
+            full_name = safe_str(info.get('DISPLAY_FIRST_LAST', 'Unknown Player'))
+            first_name = safe_str(info.get('FIRST_NAME', ''))
+            last_name = safe_str(info.get('LAST_NAME', ''))
+            team_id = safe_int(info.get('TEAM_ID'))
+            
+            if team_id == 0:
+                team_id = None
+            
+            jersey = safe_str(info.get('JERSEY'))
+            position = safe_str(info.get('POSITION'))
+            height = safe_str(info.get('HEIGHT'))
+            weight = safe_int(info.get('WEIGHT'))
+            birthdate = safe_str(info.get('BIRTHDATE'))
+            draft_year = safe_str(info.get('DRAFT_YEAR'))
+            draft_round = safe_str(info.get('DRAFT_ROUND'))
+            draft_number = safe_str(info.get('DRAFT_NUMBER'))
+            
+            height_inches = None
+            if height and '-' in height:
+                try:
+                    parts = height.split('-')
+                    if len(parts) == 2:
+                        feet = int(parts[0])
+                        inches = int(parts[1])
+                        height_inches = (feet * 12) + inches
+                except:
+                    pass
+            
+            if draft_year and draft_year.lower() == 'undrafted':
+                draft_year = None
+                draft_round = None
+                draft_number = None
+            else:
+                draft_year = safe_int(draft_year)
+                draft_round = safe_int(draft_round)
+                draft_number = safe_int(draft_number)
+            
+            cur.execute("""
+                INSERT INTO players (player_id, full_name, first_name, last_name, is_active,
+                                   team_id, jersey_number, position, height_inches, weight_lbs,
+                                   birth_date, draft_year, draft_round, draft_number)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (player_id) DO NOTHING
+            """, (
+                player_id, full_name, first_name, last_name, True,
+                team_id, jersey, position, height_inches, weight,
+                birthdate, draft_year, draft_round, draft_number
+            ))
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+    except Exception as e:
+        try:
+            conn.close()
+        except:
+            pass
+        return False
+
 def update_players():
     print("Updating active players...")
     
@@ -40,7 +126,6 @@ def update_players():
     active_players = [p for p in all_players if p['is_active']]
     
     new_players = 0
-    updated_players = 0
     
     for player in active_players:
         try:
@@ -66,6 +151,9 @@ def update_players():
                 info = info_df.iloc[0]
                 
                 team_id = safe_int(info.get('TEAM_ID'))
+                if team_id == 0:
+                    team_id = None
+                    
                 jersey = safe_str(info.get('JERSEY'))
                 position = safe_str(info.get('POSITION'))
                 height = safe_str(info.get('HEIGHT'))
@@ -110,11 +198,7 @@ def update_players():
                     birthdate, draft_year, draft_round, draft_number
                 ))
                 
-                if exists:
-                    updated_players += 1
-                else:
-                    new_players += 1
-                
+                new_players += 1
                 conn.commit()
             
         except Exception as e:
@@ -125,7 +209,6 @@ def update_players():
     conn.close()
     
     print(f"New players added: {new_players}")
-    print(f"Players updated: {updated_players}")
 
 def update_games():
     print(f"\nUpdating games for {CURRENT_SEASON} season...")
@@ -276,6 +359,7 @@ def update_player_stats():
     
     count = 0
     errors = 0
+    players_added = 0
     
     for game_id in game_ids:
         try:
@@ -285,16 +369,23 @@ def update_player_stats():
             player_stats = boxscore.get_data_frames()[0]
             
             for idx, row in player_stats.iterrows():
-                player_id = safe_int(row['personId'])
-                team_id = safe_int(row['teamId'])
+                player_id = safe_int(row.get('personId'))
+                team_id = safe_int(row.get('teamId'))
                 
                 if not player_id or not team_id:
                     continue
                 
-                start_position = str(row.get('position', ''))
-                is_starter = start_position != '' and start_position != 'None'
+                cur.execute("SELECT player_id FROM players WHERE player_id = %s", (player_id,))
+                if not cur.fetchone():
+                    if add_missing_player(player_id):
+                        players_added += 1
+                    else:
+                        continue
                 
-                minutes = safe_float(row.get('minutes'))
+                start_position = str(row.get('position', ''))
+                is_starter = start_position != '' and start_position != 'None' and start_position != 'nan'
+                
+                minutes = parse_minutes(row.get('minutes'))
                 if minutes == 0 or minutes is None:
                     continue
                 
@@ -333,21 +424,22 @@ def update_player_stats():
                     errors += 1
                     continue
             
+            conn.commit()
             count += 1
+            
             if count % 20 == 0:
                 print(f"Processed {count}/{len(game_ids)} games...")
-                conn.commit()
                 
         except Exception as e:
             errors += 1
             print(f"Error processing game {game_id}: {e}")
             continue
     
-    conn.commit()
     cur.close()
     conn.close()
     
     print(f"Successfully processed {count} games!")
+    print(f"Players added: {players_added}")
     print(f"Errors: {errors}")
 
 if __name__ == "__main__":
