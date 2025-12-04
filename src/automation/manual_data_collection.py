@@ -23,6 +23,7 @@ def run_manual_collection():
         ("Update team ratings", "../data_collection/update_team_ratings_incremental.py", yesterday),
         ("Update team defensive stats", "../data_collection/update_team_defensive_stats_incremental.py", yesterday),
         ("Update position defense", "../data_collection/update_position_defense_stats_incremental.py", yesterday),
+        ("Scrape injuries", "../data_collection/scrape_injuries.py", None),
         ("Mark recovered players", "../data_collection/mark_recovered_players.py", yesterday),
         ("Collect today's schedule", "../data_collection/collect_todays_schedule.py", today),
         ("Generate predictions for today", "../predictions/predict_games.py", today),
@@ -34,11 +35,17 @@ def run_manual_collection():
         print(f"STEP: {step_name}")
         print("="*50)
         
-        result = subprocess.run([
-            sys.executable,
-            script_path,
-            str(date_arg)
-        ], capture_output=True, text=True)
+        if date_arg is None:
+            result = subprocess.run([
+                sys.executable,
+                script_path
+            ], capture_output=True, text=True)
+        else:
+            result = subprocess.run([
+                sys.executable,
+                script_path,
+                str(date_arg)
+            ], capture_output=True, text=True)
         
         print(result.stdout)
         
