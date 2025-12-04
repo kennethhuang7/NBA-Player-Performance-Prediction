@@ -26,6 +26,14 @@ def run_daily_pipeline():
     if result.stderr:
         print("ERROR:", result.stderr)
     
+    if result.returncode != 0:
+        print("\n" + "="*50)
+        print("STEP 1 FAILED - NBA API TIMEOUT")
+        print("="*50)
+        print("Manual collection required!")
+        print("Run: python src/automation/manual_data_collection.py")
+        sys.exit(1)
+    
     print("\nSTEP 2: Update career stats (players who played yesterday)")
     print("-"*50)
     result = subprocess.run([
