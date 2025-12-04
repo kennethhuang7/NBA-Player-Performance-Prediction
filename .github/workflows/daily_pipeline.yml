@@ -30,44 +30,48 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Run daily pipeline
-      id: pipeline
+    - name: Run Step 1 - Collect yesterday's games
+      id: collect_games
       continue-on-error: true
+      run: |
+        cd src/data_collection
+        python update_yesterday_games.py
+    
+    - name: Run remaining steps
+      if: steps.collect_games.outcome == 'success'
       run: |
         cd src/automation
         python daily_pipeline.py
     
-    - name: Check pipeline status
-      if: steps.pipeline.outcome == 'failure'
+    - name: Run injuries and predictions only
+      if: steps.collect_games.outcome == 'failure'
       run: |
-        echo "Pipeline failed - manual collection needed" > pipeline_status.txt
-        cat pipeline_status.txt
+        cd src/data_collection
+        python scrape_injuries.py
+        python mark_recovered_players.py
+        python collect_todays_schedule.py
+        cd ../predictions
+        python predict_games.py
     
-    - name: Send notification on failure
-      if: steps.pipeline.outcome == 'failure'
+    - name: Send email notification
+      if: steps.collect_games.outcome == 'failure'
       uses: dawidd6/action-send-mail@v3
       with:
         server_address: smtp.gmail.com
         server_port: 465
         username: ${{ secrets.EMAIL_USERNAME }}
         password: ${{ secrets.EMAIL_PASSWORD }}
-        subject: NBA Pipeline Failed - Manual Run Needed
+        subject: NBA API Timeout - Manual Collection Needed
         to: ${{ secrets.EMAIL_TO }}
         from: NBA Predictor Bot
         body: |
-          The NBA data collection pipeline failed at 3 AM.
-          
-          This likely means the NBA API timed out from GitHub Actions.
+          The NBA API timed out at 3 AM EST.
           
           Please run the manual collection script:
-          python src/automation/manual_data_collection.py
           
-          Check the failed run at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    
-    - name: Upload logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: pipeline-logs
-        path: src/automation/*.log
-        retention-days: 7
+          cd src/automation
+          python manual_data_collection.py
+          
+          This will collect yesterday's games and update all stats.
+          
+          Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
