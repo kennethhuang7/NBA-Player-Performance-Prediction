@@ -36,16 +36,22 @@ def collect_schedule(target_date=None):
         
         print(f"Found {len(games)} games\n")
         
+        scheduled_count = 0
+        
         for game in games:
             game_id = game['gameId']
             home_team_id = int(game['homeTeam']['teamId'])
             away_team_id = int(game['awayTeam']['teamId'])
-            game_status = game['gameStatusText']
+            game_status_text = game['gameStatusText']
+            game_status_int = game['gameStatus']
             
-            if 'Final' in game_status:
-                status = 'completed'
-            else:
+            if game_status_int == 1:
                 status = 'scheduled'
+                scheduled_count += 1
+            elif game_status_int == 2:
+                status = 'in_progress'
+            else:
+                status = 'completed'
             
             cur.execute("""
                 INSERT INTO games (
@@ -71,7 +77,7 @@ def collect_schedule(target_date=None):
         conn.close()
         
         print(f"\n{'='*50}")
-        print(f"Collected {len(games)} games for today")
+        print(f"Found {scheduled_count} scheduled games for {target_date}")
         print(f"{'='*50}")
         
     except Exception as e:
