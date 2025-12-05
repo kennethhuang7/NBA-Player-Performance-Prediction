@@ -10,6 +10,46 @@ import warnings
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
 warnings.filterwarnings('ignore', category=FutureWarning)
 
+def calculate_confidence(features_df, recent_games_df):
+    score = 0
+    
+    if len(recent_games_df) >= 5:
+        points_std = recent_games_df['points'].std()
+        points_mean = recent_games_df['points'].mean()
+        if points_mean > 0:
+            cv = points_std / points_mean
+            score += max(0, 30 - (cv * 60))
+        else:
+            score += 15
+    else:
+        score += 10
+    
+    required = ['points_l5', 'points_l10', 'is_home', 'days_rest', 
+                'offensive_rating_team', 'defensive_rating_opp']
+    available = sum(1 for feat in required if feat in features_df.columns)
+    score += (available / len(required)) * 20
+    
+    games = len(recent_games_df)
+    if games >= 20:
+        score += 25
+    elif games >= 10:
+        score += 20
+    elif games >= 5:
+        score += 15
+    else:
+        score += 10
+    
+    context = 25
+    if 'is_back_to_back' in features_df.columns and features_df['is_back_to_back'].iloc[0] == 1:
+        context -= 5
+    if 'star_teammate_out' in features_df.columns and features_df['star_teammate_out'].iloc[0] == 1:
+        context -= 5
+    if 'altitude_away' in features_df.columns and features_df['altitude_away'].iloc[0] == 1:
+        context -= 3
+    score += max(0, context)
+    
+    return int(max(0, min(100, score)))
+
 def predict_upcoming_games(target_date=None):
     print("Predicting player performance for upcoming games...\n")
     
@@ -71,7 +111,6 @@ def predict_upcoming_games(target_date=None):
             team_name = "home" if is_home else "away"
             print(f"  Processing {team_name} team {team_id}...")
             
-            # FIXED QUERY: Now filters by team_id in the subquery!
             players_query = f"""
                 SELECT DISTINCT player_id
                 FROM player_game_stats
@@ -91,7 +130,7 @@ def predict_upcoming_games(target_date=None):
             print(f"    Found {len(players)} qualifying players")
             
             for player_id in players['player_id']:
-                features = build_features_for_player(
+                features, recent_games = build_features_for_player(
                     conn, player_id, team_id, opponent_id, 
                     is_home, season, target_date, game_type
                 )
@@ -104,14 +143,16 @@ def predict_upcoming_games(target_date=None):
                     pred = model.predict(features)[0]
                     predictions[stat_name] = float(round(pred, 1))
                 
+                confidence_score = calculate_confidence(features, recent_games)
+                
                 try:
                     cur.execute("""
                         INSERT INTO predictions (
                             game_id, player_id, prediction_date,
                             predicted_points, predicted_rebounds, predicted_assists,
                             predicted_steals, predicted_blocks, predicted_turnovers,
-                            predicted_three_pointers_made, confidence_score
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            predicted_three_pointers_made, confidence_score, model_version
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (game_id, player_id) DO UPDATE SET
                             predicted_points = EXCLUDED.predicted_points,
                             predicted_rebounds = EXCLUDED.predicted_rebounds,
@@ -120,7 +161,8 @@ def predict_upcoming_games(target_date=None):
                             predicted_blocks = EXCLUDED.predicted_blocks,
                             predicted_turnovers = EXCLUDED.predicted_turnovers,
                             predicted_three_pointers_made = EXCLUDED.predicted_three_pointers_made,
-                            confidence_score = EXCLUDED.confidence_score
+                            confidence_score = EXCLUDED.confidence_score,
+                            model_version = EXCLUDED.model_version
                     """, (
                         game_id,
                         player_id,
@@ -132,7 +174,8 @@ def predict_upcoming_games(target_date=None):
                         predictions['blocks'],
                         predictions['turnovers'],
                         predictions['three_pointers_made'],
-                        0.75
+                        confidence_score,
+                        'xgboost'
                     ))
                     
                     predictions_inserted += 1
@@ -198,7 +241,7 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
     recent_games = pd.read_sql(query, conn)
     
     if len(recent_games) < 5:
-        return None
+        return None, None
     
     features = {}
     
@@ -318,7 +361,6 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
         features['arena_altitude'] = 0
         features['altitude_away'] = 0
     
-    # Teammate dependency features
     star_query = f"""
         SELECT DISTINCT pgs2.player_id, AVG(pgs2.points) as ppg
         FROM player_game_stats pgs2
@@ -343,7 +385,6 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
             star_id = star['player_id']
             star_ppg = star['ppg']
             
-            # Check if star is injured/out
             injury_query = f"""
                 SELECT COUNT(*)
                 FROM injuries
@@ -356,7 +397,6 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
             star_out = pd.read_sql(injury_query, conn).iloc[0][0]
             
             if star_out > 0:
-                # Calculate historical games without this star
                 games_without_query = f"""
                     SELECT COUNT(*)
                     FROM player_game_stats pgs
@@ -397,7 +437,7 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
     
     features_df = features_df[column_order]
     
-    return features_df
+    return features_df, recent_games
 
 if __name__ == "__main__":
     import sys
