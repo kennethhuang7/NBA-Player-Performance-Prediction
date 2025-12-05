@@ -6,6 +6,10 @@ import pandas as pd
 import joblib
 from datetime import datetime, timedelta
 
+import warnings
+warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 def predict_upcoming_games(target_date=None):
     print("Predicting player performance for upcoming games...\n")
     
@@ -58,10 +62,16 @@ def predict_upcoming_games(target_date=None):
         season = game['season']
         game_type = game['game_type']
         
+        print(f"\nProcessing game {game_id}...")
+        
         for team_id in [home_team, away_team]:
             is_home = 1 if team_id == home_team else 0
             opponent_id = away_team if is_home else home_team
             
+            team_name = "home" if is_home else "away"
+            print(f"  Processing {team_name} team {team_id}...")
+            
+            # FIXED QUERY: Now filters by team_id in the subquery!
             players_query = f"""
                 SELECT DISTINCT player_id
                 FROM player_game_stats
@@ -70,12 +80,15 @@ def predict_upcoming_games(target_date=None):
                         SELECT game_id FROM games 
                         WHERE season = '{season}' 
                         AND game_date < '{target_date}'
+                        AND (home_team_id = {team_id} OR away_team_id = {team_id})
                         ORDER BY game_date DESC
                         LIMIT 10
                     )
             """
             
             players = pd.read_sql(players_query, conn)
+            
+            print(f"    Found {len(players)} qualifying players")
             
             for player_id in players['player_id']:
                 features = build_features_for_player(
@@ -151,7 +164,7 @@ def predict_upcoming_games(target_date=None):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     pred_df.to_csv(output_path, index=False)
     
-    print("="*50)
+    print("\n" + "="*50)
     print("PREDICTIONS COMPLETE!")
     print("="*50)
     print(f"Generated predictions for {len(pred_df)} players")

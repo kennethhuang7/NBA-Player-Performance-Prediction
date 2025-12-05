@@ -4,6 +4,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_collection.utils import get_db_connection
 import pandas as pd
 
+import warnings
+warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 conn = get_db_connection()
 df = pd.read_sql("""
     SELECT DISTINCT game_date, COUNT(*) as games 

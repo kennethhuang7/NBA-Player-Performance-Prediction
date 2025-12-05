@@ -5,6 +5,10 @@ from data_collection.utils import get_db_connection
 import pandas as pd
 from datetime import datetime, timedelta
 
+import warnings
+warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 def evaluate_predictions(target_date=None):
     print("Evaluating prediction accuracy...\n")
     

@@ -8,6 +8,10 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 import xgboost as xgb
 import joblib
 
+import warnings
+warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 def train_xgboost_models():
     print("Training XGBoost models for NBA player predictions...\n")
     
