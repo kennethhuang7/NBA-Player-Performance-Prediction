@@ -6,105 +6,6 @@ import pandas as pd
 import joblib
 from datetime import datetime, timedelta
 
-def get_injured_stars(target_date, season='2025-26'):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    cur.execute("""
-        SELECT DISTINCT i.player_id, p.full_name
-        FROM injuries i
-        JOIN players p ON i.player_id = p.player_id
-        WHERE i.injury_status = 'Out'
-        AND i.report_date <= %s
-        AND (i.return_date IS NULL OR i.return_date > %s)
-        AND EXISTS (
-            SELECT 1 
-            FROM player_game_stats pgs
-            JOIN games g ON pgs.game_id = g.game_id
-            WHERE pgs.player_id = i.player_id
-            AND g.season = %s
-            GROUP BY pgs.player_id
-            HAVING AVG(pgs.points) >= 20
-        )
-    """, (target_date, target_date, season))
-    
-    injured_stars = cur.fetchall()
-    cur.close()
-    conn.close()
-    
-    return injured_stars
-
-def get_teammate_boosts(player_id, season='2025-26'):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    cur.execute("""
-        SELECT 
-            player_id,
-            ppg_boost,
-            rpg_boost,
-            apg_boost
-        FROM teammate_dependency
-        WHERE teammate_id = %s
-        AND season = %s
-    """, (player_id, season))
-    
-    boosts = {}
-    for row in cur.fetchall():
-        teammate_id, ppg_boost, rpg_boost, apg_boost = row
-        boosts[teammate_id] = {
-            'ppg_boost': float(ppg_boost),
-            'rpg_boost': float(rpg_boost),
-            'apg_boost': float(apg_boost)
-        }
-    
-    cur.close()
-    conn.close()
-    
-    return boosts
-
-def apply_teammate_boosts(all_predictions, target_date, season='2025-26'):
-    print("\nChecking for injured stars and applying teammate boosts...")
-    
-    injured_stars = get_injured_stars(target_date, season)
-    
-    if not injured_stars:
-        print("No injured star players found")
-        return all_predictions
-    
-    print(f"Found {len(injured_stars)} injured star players:")
-    
-    total_adjustments = 0
-    
-    for star_id, star_name in injured_stars:
-        print(f"  {star_name} is out")
-        
-        boosts = get_teammate_boosts(star_id, season)
-        
-        if not boosts:
-            print(f"    No teammate dependencies found")
-            continue
-        
-        print(f"    Found {len(boosts)} teammates with usage boosts")
-        
-        for pred in all_predictions:
-            player_id = pred['player_id']
-            
-            if player_id in boosts:
-                boost = boosts[player_id]
-                
-                pred['points'] += boost['ppg_boost']
-                pred['rebounds'] += boost['rpg_boost']
-                pred['assists'] += boost['apg_boost']
-                
-                total_adjustments += 1
-                
-                print(f"      Adjusted player {player_id}: {boost['ppg_boost']:+.1f} PPG, {boost['rpg_boost']:+.1f} RPG, {boost['apg_boost']:+.1f} APG")
-    
-    print(f"\nApplied {total_adjustments} teammate boost adjustments\n")
-    
-    return all_predictions
-
 def predict_upcoming_games(target_date=None):
     print("Predicting player performance for upcoming games...\n")
     
@@ -148,6 +49,7 @@ def predict_upcoming_games(target_date=None):
     }
     
     all_predictions = []
+    predictions_inserted = 0
     
     for _, game in games_df.iterrows():
         game_id = game['game_id']
@@ -189,6 +91,44 @@ def predict_upcoming_games(target_date=None):
                     pred = model.predict(features)[0]
                     predictions[stat_name] = float(round(pred, 1))
                 
+                try:
+                    cur.execute("""
+                        INSERT INTO predictions (
+                            game_id, player_id, prediction_date,
+                            predicted_points, predicted_rebounds, predicted_assists,
+                            predicted_steals, predicted_blocks, predicted_turnovers,
+                            predicted_three_pointers_made, confidence_score
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (game_id, player_id) DO UPDATE SET
+                            predicted_points = EXCLUDED.predicted_points,
+                            predicted_rebounds = EXCLUDED.predicted_rebounds,
+                            predicted_assists = EXCLUDED.predicted_assists,
+                            predicted_steals = EXCLUDED.predicted_steals,
+                            predicted_blocks = EXCLUDED.predicted_blocks,
+                            predicted_turnovers = EXCLUDED.predicted_turnovers,
+                            predicted_three_pointers_made = EXCLUDED.predicted_three_pointers_made,
+                            confidence_score = EXCLUDED.confidence_score
+                    """, (
+                        game_id,
+                        player_id,
+                        target_date,
+                        predictions['points'],
+                        predictions['rebounds'],
+                        predictions['assists'],
+                        predictions['steals'],
+                        predictions['blocks'],
+                        predictions['turnovers'],
+                        predictions['three_pointers_made'],
+                        0.75
+                    ))
+                    
+                    predictions_inserted += 1
+                    
+                except Exception as e:
+                    print(f"Error inserting prediction for player {player_id}: {e}")
+                    conn.rollback()
+                    continue
+                
                 all_predictions.append({
                     'game_id': game_id,
                     'player_id': player_id,
@@ -196,49 +136,6 @@ def predict_upcoming_games(target_date=None):
                     'is_home': is_home,
                     **predictions
                 })
-    
-    all_predictions = apply_teammate_boosts(all_predictions, target_date, games_df.iloc[0]['season'])
-    
-    predictions_inserted = 0
-    
-    for pred in all_predictions:
-        try:
-            cur.execute("""
-                INSERT INTO predictions (
-                    game_id, player_id, prediction_date,
-                    predicted_points, predicted_rebounds, predicted_assists,
-                    predicted_steals, predicted_blocks, predicted_turnovers,
-                    predicted_three_pointers_made, confidence_score
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (game_id, player_id) DO UPDATE SET
-                    predicted_points = EXCLUDED.predicted_points,
-                    predicted_rebounds = EXCLUDED.predicted_rebounds,
-                    predicted_assists = EXCLUDED.predicted_assists,
-                    predicted_steals = EXCLUDED.predicted_steals,
-                    predicted_blocks = EXCLUDED.predicted_blocks,
-                    predicted_turnovers = EXCLUDED.predicted_turnovers,
-                    predicted_three_pointers_made = EXCLUDED.predicted_three_pointers_made,
-                    confidence_score = EXCLUDED.confidence_score
-            """, (
-                pred['game_id'],
-                pred['player_id'],
-                target_date,
-                pred['points'],
-                pred['rebounds'],
-                pred['assists'],
-                pred['steals'],
-                pred['blocks'],
-                pred['turnovers'],
-                pred['three_pointers_made'],
-                0.75
-            ))
-            
-            predictions_inserted += 1
-            
-        except Exception as e:
-            print(f"Error inserting prediction for player {pred['player_id']}: {e}")
-            conn.rollback()
-            continue
     
     conn.commit()
     cur.close()
@@ -408,12 +305,75 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
         features['arena_altitude'] = 0
         features['altitude_away'] = 0
     
+    # Teammate dependency features
+    star_query = f"""
+        SELECT DISTINCT pgs2.player_id, AVG(pgs2.points) as ppg
+        FROM player_game_stats pgs2
+        JOIN games g2 ON pgs2.game_id = g2.game_id
+        WHERE pgs2.team_id = {team_id}
+        AND g2.season = '{season}'
+        AND g2.game_date < '{target_date}'
+        AND pgs2.player_id != {player_id}
+        AND pgs2.minutes_played >= 15
+        GROUP BY pgs2.player_id
+        HAVING AVG(pgs2.points) >= 20
+    """
+    
+    star_teammates = pd.read_sql(star_query, conn)
+    
+    features['star_teammate_out'] = 0
+    features['star_teammate_ppg'] = 0.0
+    features['games_without_star'] = 0
+    
+    if len(star_teammates) > 0:
+        for _, star in star_teammates.iterrows():
+            star_id = star['player_id']
+            star_ppg = star['ppg']
+            
+            # Check if star is injured/out
+            injury_query = f"""
+                SELECT COUNT(*)
+                FROM injuries
+                WHERE player_id = {star_id}
+                AND injury_status = 'Out'
+                AND report_date <= '{target_date}'
+                AND (return_date IS NULL OR return_date > '{target_date}')
+            """
+            
+            star_out = pd.read_sql(injury_query, conn).iloc[0][0]
+            
+            if star_out > 0:
+                # Calculate historical games without this star
+                games_without_query = f"""
+                    SELECT COUNT(*)
+                    FROM player_game_stats pgs
+                    JOIN games g ON pgs.game_id = g.game_id
+                    WHERE pgs.player_id = {player_id}
+                    AND pgs.team_id = {team_id}
+                    AND g.season = '{season}'
+                    AND g.game_date < '{target_date}'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM player_game_stats pgs2
+                        WHERE pgs2.game_id = pgs.game_id
+                        AND pgs2.player_id = {star_id}
+                        AND pgs2.minutes_played >= 15
+                    )
+                """
+                
+                games_without = pd.read_sql(games_without_query, conn).iloc[0][0]
+                
+                features['star_teammate_out'] = 1
+                features['star_teammate_ppg'] = float(star_ppg)
+                features['games_without_star'] = games_without
+                break
+    
     features_df = pd.DataFrame([features])
     
     column_order = [
         'is_playoff', 'points_l5', 'rebounds_total_l5', 'assists_l5',
         'points_l10', 'rebounds_total_l10', 'assists_l10',
         'points_l20', 'rebounds_total_l20', 'assists_l20',
+        'star_teammate_out', 'star_teammate_ppg', 'games_without_star',  
         'playoff_games_career', 'playoff_performance_boost',
         'is_home', 'days_rest', 'is_back_to_back', 'games_played_season',
         'offensive_rating_team', 'defensive_rating_team', 'pace_team',

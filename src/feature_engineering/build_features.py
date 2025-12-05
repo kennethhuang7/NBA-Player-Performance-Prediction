@@ -5,7 +5,7 @@ from data_collection.utils import get_db_connection
 import pandas as pd
 
 def build_features_for_training():
-    print("Building MVP features for model training...\n")
+    print("Building features for model training...\n")
     
     conn = get_db_connection()
     
@@ -53,6 +53,39 @@ def build_features_for_training():
             df[f'{stat}_l{window}'] = df.groupby('player_id')[stat].transform(
                 lambda x: x.rolling(window=window, min_periods=1).mean().shift(1)
             )
+    
+    print("  - Teammate dependency features")
+    df['star_teammate_out'] = 0
+    df['star_teammate_ppg'] = 0.0
+    df['games_without_star'] = 0
+    
+    team_season_stars = df[df['minutes_played'] >= 15].groupby(['player_id', 'team_id', 'season'])['points'].mean()
+    team_season_stars = team_season_stars[team_season_stars >= 20].reset_index()
+    team_season_stars.columns = ['star_id', 'team_id', 'season', 'star_ppg']
+    
+    for idx, row in team_season_stars.iterrows():
+        star_id = row['star_id']
+        team_id = row['team_id']
+        season = row['season']
+        star_ppg = row['star_ppg']
+        
+        star_games = set(df[(df['player_id'] == star_id) & 
+                            (df['team_id'] == team_id) & 
+                            (df['season'] == season) & 
+                            (df['minutes_played'] >= 15)]['game_id'])
+        
+        teammate_mask = ((df['team_id'] == team_id) & 
+                        (df['season'] == season) & 
+                        (df['player_id'] != star_id) & 
+                        (~df['game_id'].isin(star_games)))
+        
+        df.loc[teammate_mask, 'star_teammate_out'] = 1
+        df.loc[teammate_mask, 'star_teammate_ppg'] = star_ppg
+    
+    for player_id in df[df['star_teammate_out'] == 1]['player_id'].unique():
+        player_data = df[df['player_id'] == player_id].copy()
+        cumsum = player_data['star_teammate_out'].cumsum()
+        df.loc[df['player_id'] == player_id, 'games_without_star'] = cumsum
     
     print("  - Playoff experience")
     df['playoff_games_career'] = df.groupby('player_id')['is_playoff'].cumsum()
@@ -141,6 +174,7 @@ def build_features_for_training():
     print("="*50)
     print(f"Total columns: {len(df.columns)}")
     print(f"Total records: {len(df)}")
+    print(f"Records with star teammate out: {df['star_teammate_out'].sum()}")
     
     output_path = '../../data/processed/training_features.csv'
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

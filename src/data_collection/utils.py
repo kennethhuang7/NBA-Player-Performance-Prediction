@@ -1,5 +1,7 @@
 import psycopg2
 import os
+import time    
+import random 
 from dotenv import load_dotenv
 
 load_dotenv()

@@ -20,7 +20,8 @@ def train_xgboost_models():
     
     feature_cols = [col for col in df.columns if any(x in col for x in 
                ['_l5', '_l10', '_l20', 'is_', 'days_rest', 'games_played',
-                'offensive_rating', 'defensive_rating', 'pace', 'opp_', 'altitude', 'playoff'])]
+                'offensive_rating', 'defensive_rating', 'pace', 'opp_', 'altitude', 'playoff',
+                'star_teammate', 'games_without_star'])]
     
     X = df[feature_cols].fillna(0)
     
