@@ -15,8 +15,13 @@ st.set_page_config(
     page_title="NBA Predictions",
     page_icon="🏀",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
+
+def show_navigation():
+    st.sidebar.markdown("## NBA Predictions")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("Use the pages menu above to navigate between pages")
 
 def get_db_connection():
     try:
@@ -1077,6 +1082,7 @@ def display_players(players_df, target_date):
 
 def main():
     load_custom_css()
+    show_navigation()
     
     st.markdown("""
     <h1>NBA PREDICTIONS</h1>
