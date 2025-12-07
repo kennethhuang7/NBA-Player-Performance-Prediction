@@ -9,7 +9,9 @@ import plotly.express as px
 import numpy as np
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 from streamlit_app.utils import get_ensemble_selection
 
 import warnings

@@ -8,7 +8,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 import re
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 from streamlit_app.utils import get_ensemble_selection
 
 import warnings
