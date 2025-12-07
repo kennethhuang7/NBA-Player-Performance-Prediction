@@ -27,23 +27,56 @@ def show_navigation():
         function hideStreamlitAppTitle() {
             const sidebar = document.querySelector('[data-testid="stSidebar"]');
             if (sidebar) {
-                const firstChild = sidebar.querySelector('div:first-child > div:first-child');
-                if (firstChild && firstChild.textContent && firstChild.textContent.toLowerCase().includes('streamlit app')) {
-                    firstChild.style.display = 'none';
+                const walker = document.createTreeWalker(
+                    sidebar,
+                    NodeFilter.SHOW_TEXT,
+                    null,
+                    false
+                );
+                let node;
+                while (node = walker.nextNode()) {
+                    if (node.textContent.trim().toLowerCase() === 'streamlit app') {
+                        let parent = node.parentElement;
+                        while (parent && parent !== sidebar) {
+                            if (parent.tagName === 'P' || parent.tagName === 'DIV' || parent.tagName === 'SPAN') {
+                                parent.style.display = 'none';
+                                break;
+                            }
+                            parent = parent.parentElement;
+                        }
+                    }
                 }
-                const allElements = sidebar.querySelectorAll('p, div, span');
+                const allElements = sidebar.querySelectorAll('*');
                 allElements.forEach(el => {
                     if (el.textContent && el.textContent.trim().toLowerCase() === 'streamlit app') {
                         el.style.display = 'none';
+                        el.style.visibility = 'hidden';
+                        el.style.height = '0';
+                        el.style.margin = '0';
+                        el.style.padding = '0';
                     }
                 });
             }
         }
         hideStreamlitAppTitle();
+        setTimeout(hideStreamlitAppTitle, 50);
         setTimeout(hideStreamlitAppTitle, 100);
+        setTimeout(hideStreamlitAppTitle, 300);
         setTimeout(hideStreamlitAppTitle, 500);
+        setTimeout(hideStreamlitAppTitle, 1000);
+        
+        const observer = new MutationObserver(hideStreamlitAppTitle);
+        const sidebar = document.querySelector('[data-testid="stSidebar"]');
+        if (sidebar) {
+            observer.observe(sidebar, { childList: true, subtree: true });
+        }
     })();
     </script>
+    <style>
+    [data-testid="stSidebar"] > div:first-child > div:first-child {
+        display: none !important;
+    }
+    </style>
     """, unsafe_allow_html=True)
     st.sidebar.markdown("## Predictions")
     st.sidebar.markdown("---")
