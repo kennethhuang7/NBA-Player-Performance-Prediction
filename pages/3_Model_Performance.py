@@ -3,12 +3,12 @@ import pandas as pd
 import psycopg2
 from datetime import datetime, timedelta
 import os
+import sys
 from dotenv import load_dotenv
 import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
-import sys
-import os
+
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 streamlit_app_dir = os.path.join(root_dir, 'streamlit_app')
 if streamlit_app_dir not in sys.path:
