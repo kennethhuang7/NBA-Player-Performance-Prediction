@@ -135,7 +135,11 @@ def build_features_for_training():
     """, conn)
     
     df = df.merge(
-        team_ratings,
+        team_ratings.rename(columns={
+            'offensive_rating': 'offensive_rating_team',
+            'defensive_rating': 'defensive_rating_team',
+            'pace': 'pace_team'
+        }),
         left_on=['team_id', 'season'],
         right_on=['team_id', 'season'],
         how='left'
@@ -148,11 +152,15 @@ def build_features_for_training():
     )
     
     df = df.merge(
-        team_ratings,
+        team_ratings.rename(columns={
+            'offensive_rating': 'offensive_rating_opp',
+            'defensive_rating': 'defensive_rating_opp',
+            'pace': 'pace_opp'
+        }),
         left_on=['opponent_id', 'season'],
         right_on=['team_id', 'season'],
         how='left',
-        suffixes=('_team', '_opp')
+        suffixes=('', '_opp_ratings')
     )
     
     print("  - Opponent defense")
@@ -171,6 +179,62 @@ def build_features_for_training():
         suffixes=('', '_oppdef')
     )
     
+    print("  - Position-specific opponent defense")
+    def map_position_to_defense_position(pos):
+        """
+        Maps player positions to defense position categories (G, F, C).
+        Maps:
+        - Guards and Guard-Forwards → 'G'
+        - Forwards and Forward-Centers → 'F'
+        - Centers → 'C'
+        """
+        if pd.isna(pos):
+            return 'G'
+        pos_str = str(pos).upper().strip()
+        if ('CENTER' in pos_str or pos_str == 'C') and 'GUARD' not in pos_str and 'FORWARD' not in pos_str:
+            return 'C'
+        elif 'FORWARD' in pos_str or pos_str == 'F' or pos_str == 'F-C':
+            return 'F'
+        elif 'GUARD' in pos_str or pos_str == 'G' or pos_str == 'G-F':
+            return 'G'
+        else:
+            return 'G'
+    
+    df['defense_position'] = df['position'].apply(map_position_to_defense_position)
+    
+    pos_defense = pd.read_sql("""
+        SELECT team_id, season, position,
+               points_allowed_per_game,
+               rebounds_allowed_per_game,
+               assists_allowed_per_game,
+               steals_allowed_per_game,
+               blocks_allowed_per_game,
+               turnovers_forced_per_game,
+               three_pointers_made_allowed_per_game
+        FROM position_defense_stats
+    """, conn)
+    
+    df = df.merge(
+        pos_defense,
+        left_on=['opponent_id', 'season', 'defense_position'],
+        right_on=['team_id', 'season', 'position'],
+        how='left',
+        suffixes=('', '_pos_def')
+    )
+    
+    df = df.rename(columns={
+        'points_allowed_per_game': 'opp_points_allowed_to_position',
+        'rebounds_allowed_per_game': 'opp_rebounds_allowed_to_position',
+        'assists_allowed_per_game': 'opp_assists_allowed_to_position',
+        'steals_allowed_per_game': 'opp_steals_allowed_to_position',
+        'blocks_allowed_per_game': 'opp_blocks_allowed_to_position',
+        'turnovers_forced_per_game': 'opp_turnovers_forced_to_position',
+        'three_pointers_made_allowed_per_game': 'opp_three_pointers_allowed_to_position'
+    })
+    
+    
+    df = df.drop(columns=['defense_position'], errors='ignore')
+    
     print("  - Altitude")
     teams_altitude = pd.read_sql("""
         SELECT team_id, arena_altitude
@@ -185,7 +249,7 @@ def build_features_for_training():
         suffixes=('', '_opp_venue')
     )
     
-    df['altitude_away'] = ((df['is_home'] == 0) & (df['arena_altitude'] > 3000)).astype(int)
+    df['altitude_away'] = ((df['is_home'] == 0) & (df['arena_altitude'].notna()) & (df['arena_altitude'] > 3000)).astype(int)
     
     conn.close()
     

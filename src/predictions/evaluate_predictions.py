@@ -22,7 +22,6 @@ def evaluate_predictions(target_date=None):
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # Get predictions for target date
     cur.execute("""
         SELECT 
             p.prediction_id,
@@ -61,7 +60,6 @@ def evaluate_predictions(target_date=None):
          pred_steals, pred_blocks, pred_turnovers, pred_threes) = pred
         
         try:
-            # Get actual stats
             cur.execute("""
                 SELECT points, rebounds_total, assists, steals, blocks, turnovers, three_pointers_made
                 FROM player_game_stats
@@ -77,7 +75,6 @@ def evaluate_predictions(target_date=None):
             (actual_points, actual_rebounds, actual_assists, actual_steals, 
              actual_blocks, actual_turnovers, actual_threes) = actual
             
-            # Calculate errors
             point_error = abs(pred_points - actual_points)
             rebound_error = abs(pred_rebounds - actual_rebounds)
             assist_error = abs(pred_assists - actual_assists)
@@ -86,11 +83,9 @@ def evaluate_predictions(target_date=None):
             turnover_error = abs(pred_turnovers - actual_turnovers)
             three_error = abs(pred_threes - actual_threes)
             
-            # Average error across all stats
             avg_error = (point_error + rebound_error + assist_error + 
                         steal_error + block_error + turnover_error + three_error) / 7
             
-            # Update prediction with actuals
             cur.execute("""
                 UPDATE predictions SET
                     actual_points = %s,
@@ -122,7 +117,6 @@ def evaluate_predictions(target_date=None):
     
     conn.commit()
     
-    # Calculate overall accuracy metrics
     cur.execute("""
         SELECT 
             AVG(ABS(predicted_points - actual_points)) as points_mae,

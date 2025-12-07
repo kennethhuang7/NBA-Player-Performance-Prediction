@@ -1,35 +1,61 @@
-from utils import get_db_connection
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils import get_db_connection
+from datetime import datetime
 
-def calculate_position_defense_stats():
-    print("Calculating position-specific defense stats...")
-    print("This shows how each team defends each position (PG, SG, SF, PF, C)\n")
+def recalculate_all_position_defense_stats(season=None):
+    if season is None:
+        today = datetime.now().date()
+        season_year = today.year
+        season_month = today.month
+        
+        if season_month >= 10:
+            season = f"{season_year}-{str(season_year+1)[-2:]}"
+        else:
+            season = f"{season_year-1}-{str(season_year)[-2:]}"
+    else:
+        if len(season) == 9 and season[4] == '-' and season[5:].isdigit():
+            year1 = season[:4]
+            year2 = season[5:]
+            season = f"{year1}-{year2[-2:]}"
+    
+    print("="*50)
+    print("RECALCULATING POSITION DEFENSE STATS")
+    print(f"Season: {season}")
+    print("="*50)
+    print()
     
     conn = get_db_connection()
     cur = conn.cursor()
     
     cur.execute("""
-        SELECT DISTINCT g.season, g.home_team_id as team_id
+        SELECT DISTINCT g.home_team_id as team_id
         FROM games g
-        WHERE g.game_status = 'completed'
+        WHERE g.season = %s AND g.game_status = 'completed'
         UNION
-        SELECT DISTINCT g.season, g.away_team_id as team_id
+        SELECT DISTINCT g.away_team_id as team_id
         FROM games g
-        WHERE g.game_status = 'completed'
-        ORDER BY season, team_id
-    """)
+        WHERE g.season = %s AND g.game_status = 'completed'
+        ORDER BY team_id
+    """, (season, season))
     
-    season_teams = cur.fetchall()
-    print(f"Found {len(season_teams)} season-team combinations to process")
+    teams = [row[0] for row in cur.fetchall()]
+    
+    if len(teams) == 0:
+        print(f"No teams found for season {season}")
+        cur.close()
+        conn.close()
+        return
+    
+    print(f"Found {len(teams)} teams to process for season {season}\n")
     
     positions = ['G', 'F', 'C']
     
-    count = 0
+    total_updates = 0
     total_inserts = 0
     
-    for season, team_id in season_teams:
+    for team_id in teams:
         for position in positions:
             cur.execute("""
                 SELECT 
@@ -93,21 +119,20 @@ def calculate_position_defense_stats():
             
             try:
                 cur.execute("""
-                    INSERT INTO position_defense_stats (
-                        team_id,
-                        season,
-                        position,
-                        games_played,
-                        points_allowed_per_game,
-                        rebounds_allowed_per_game,
-                        assists_allowed_per_game,
-                        steals_allowed_per_game,
-                        blocks_allowed_per_game,
-                        turnovers_forced_per_game,
-                        three_pointers_made_allowed_per_game,
-                        fg_pct_allowed
+                    SELECT EXISTS(
+                        SELECT 1 FROM position_defense_stats 
+                        WHERE team_id = %s AND season = %s AND position = %s
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (team_id, season, position))
+                exists_before = cur.fetchone()[0]
+                
+                cur.execute("""
+                    INSERT INTO position_defense_stats (
+                        team_id, season, position, games_played,
+                        points_allowed_per_game, rebounds_allowed_per_game, assists_allowed_per_game,
+                        steals_allowed_per_game, blocks_allowed_per_game, turnovers_forced_per_game,
+                        three_pointers_made_allowed_per_game, fg_pct_allowed
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (team_id, season, position) DO UPDATE SET
                         games_played = EXCLUDED.games_played,
                         points_allowed_per_game = EXCLUDED.points_allowed_per_game,
@@ -118,20 +143,8 @@ def calculate_position_defense_stats():
                         turnovers_forced_per_game = EXCLUDED.turnovers_forced_per_game,
                         three_pointers_made_allowed_per_game = EXCLUDED.three_pointers_made_allowed_per_game,
                         fg_pct_allowed = EXCLUDED.fg_pct_allowed
-                """, (
-                    team_id,
-                    season,
-                    position,
-                    games_count,
-                    avg_points,
-                    avg_rebounds,
-                    avg_assists,
-                    avg_steals,
-                    avg_blocks,
-                    avg_turnovers,
-                    avg_3pm_allowed,
-                    opp_fg_pct
-                ))
+                """, (team_id, season, position, games_count, avg_points, avg_rebounds, avg_assists,
+                      avg_steals, avg_blocks, avg_turnovers, avg_3pm_allowed, opp_fg_pct))
                 
                 try:
                     cur.execute("""
@@ -144,15 +157,17 @@ def calculate_position_defense_stats():
                 except Exception:
                     pass
                 
-                total_inserts += 1
+                if exists_before:
+                    total_updates += 1
+                else:
+                    total_inserts += 1
                 
             except Exception as e:
-                print(f"Error inserting team {team_id} season {season} position {position}: {e}")
+                print(f"Error processing team {team_id} position {position}: {e}")
                 continue
         
-        count += 1
-        if count % 30 == 0:
-            print(f"Processed {count}/{len(season_teams)} teams...")
+        if (teams.index(team_id) + 1) % 10 == 0:
+            print(f"Processed {teams.index(team_id) + 1}/{len(teams)} teams...")
             conn.commit()
     
     conn.commit()
@@ -160,28 +175,38 @@ def calculate_position_defense_stats():
     conn.close()
     
     print("\n" + "="*50)
-    print("POSITION DEFENSE STATS CALCULATION COMPLETE!")
+    print("RECALCULATION COMPLETE!")
     print("="*50)
-    print(f"Calculated defense for {total_inserts} team-position combinations")
+    print(f"Season: {season}")
+    print(f"Total inserts: {total_inserts}")
+    print(f"Total updates: {total_updates}")
+    print(f"Total processed: {total_inserts + total_updates} team-position combinations")
+    print("="*50)
     
-    print("\nExample: Best Guard Defense (2024-25):")
+    print("\nSample results (Best Guard Defense):")
     conn = get_db_connection()
     cur = conn.cursor()
     
     cur.execute("""
-        SELECT t.full_name, pds.points_allowed_per_game, pds.fg_pct_allowed
+        SELECT t.full_name, pds.points_allowed_per_game, pds.rebounds_allowed_per_game, 
+               pds.assists_allowed_per_game, pds.games_played
         FROM position_defense_stats pds
         JOIN teams t ON pds.team_id = t.team_id
-        WHERE pds.season = '2024-25' AND pds.position = 'G'
+        WHERE pds.season = %s AND pds.position = 'G'
         ORDER BY pds.points_allowed_per_game ASC
         LIMIT 5
-    """)
+    """, (season,))
     
     for i, row in enumerate(cur.fetchall(), 1):
-        print(f"{i}. {row[0]}: {row[1]} PPG allowed to guards (FG%: {row[2]})")
+        print(f"{i}. {row[0]}: {row[1]} PPG, {row[2]} RPG, {row[3]} APG allowed to guards ({row[4]} games)")
     
     cur.close()
     conn.close()
 
 if __name__ == "__main__":
-    calculate_position_defense_stats()
+    if len(sys.argv) > 1:
+        season = sys.argv[1]
+        recalculate_all_position_defense_stats(season)
+    else:
+        recalculate_all_position_defense_stats()
+

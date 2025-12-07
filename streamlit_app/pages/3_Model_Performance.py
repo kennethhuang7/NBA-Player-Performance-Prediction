@@ -104,7 +104,6 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 def get_model_versions():
-    """Get all available model versions from predictions"""
     conn = get_db_connection()
     try:
         query = """
@@ -121,7 +120,6 @@ def get_model_versions():
         return ['xgboost']
 
 def get_predictions_with_actuals(start_date=None, end_date=None, model_version=None, stat_filter=None):
-    """Get predictions with actuals for analysis"""
     conn = get_db_connection()
     
     where_conditions = ["p.actual_points IS NOT NULL"]
@@ -180,7 +178,6 @@ def get_predictions_with_actuals(start_date=None, end_date=None, model_version=N
         return pd.DataFrame()
 
 def calculate_mae_metrics(df):
-    """Calculate Mean Absolute Error for each stat"""
     if df.empty:
         return {}
     
@@ -199,7 +196,6 @@ def calculate_mae_metrics(df):
     return metrics
 
 def calculate_accuracy_percentage(df):
-    """Calculate accuracy percentage (how close predictions are to actuals)"""
     if df.empty:
         return {}
     
@@ -225,7 +221,6 @@ def calculate_accuracy_percentage(df):
     return accuracy
 
 def get_performance_over_time(df, period='daily'):
-    """Get performance metrics over time"""
     if df.empty:
         return pd.DataFrame()
     
@@ -248,7 +243,6 @@ def get_performance_over_time(df, period='daily'):
     return grouped.sort_values('period')
 
 def create_scatter_plot(df, stat_name):
-    """Create prediction vs actual scatter plot"""
     stat_map = {
         'points': ('predicted_points', 'actual_points', 'Points'),
         'rebounds': ('predicted_rebounds', 'actual_rebounds', 'Rebounds'),
@@ -267,7 +261,6 @@ def create_scatter_plot(df, stat_name):
     if df.empty or pred_col not in df.columns or actual_col not in df.columns:
         return None
     
-    # Remove any NaN values
     plot_df = df[[pred_col, actual_col]].dropna()
     
     if plot_df.empty:
@@ -292,7 +285,6 @@ def create_scatter_plot(df, stat_name):
         hovertemplate='<b>Actual:</b> %{x:.1f}<br><b>Predicted:</b> %{y:.1f}<extra></extra>'
     ))
     
-    # Add perfect prediction line
     fig.add_trace(go.Scatter(
         x=[min_val, max_val],
         y=[min_val, max_val],
@@ -317,7 +309,6 @@ def create_scatter_plot(df, stat_name):
     return fig
 
 def create_error_distribution(df, stat_name):
-    """Create error distribution histogram"""
     stat_map = {
         'points': ('predicted_points', 'actual_points', 'Points'),
         'rebounds': ('predicted_rebounds', 'actual_rebounds', 'Rebounds'),
@@ -353,7 +344,6 @@ def create_error_distribution(df, stat_name):
         name='Error Distribution'
     ))
     
-    # Add vertical line at 0
     fig.add_vline(
         x=0,
         line_dash="dash",
@@ -376,7 +366,6 @@ def create_error_distribution(df, stat_name):
     return fig
 
 def create_performance_trend(df):
-    """Create performance trend over time"""
     if df.empty:
         return None
     
@@ -408,7 +397,6 @@ def create_performance_trend(df):
     return fig
 
 def compare_model_versions(df, version1, version2):
-    """Compare two model versions"""
     v1_df = df[df['model_version'] == version1].copy()
     v2_df = df[df['model_version'] == version2].copy()
     
@@ -444,13 +432,10 @@ def main():
     <p class="subtitle">Track accuracy metrics and model evolution over time</p>
     """, unsafe_allow_html=True)
     
-    # Get model versions
     model_versions = get_model_versions()
     
-    # Default to 'xgboost' if it exists, otherwise first version
     default_version = 'xgboost' if 'xgboost' in model_versions else (model_versions[0] if model_versions else 'xgboost')
     
-    # Filters
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -474,7 +459,6 @@ def main():
             index=model_versions.index(default_version) if default_version in model_versions else 0
         )
     
-    # Calculate date range
     end_date = datetime.now().date()
     if time_period == "Last 7 Days":
         start_date = end_date - timedelta(days=7)
@@ -487,7 +471,6 @@ def main():
     else:
         start_date = None
     
-    # Get data
     df = get_predictions_with_actuals(start_date=start_date, end_date=end_date, model_version=selected_version)
     
     if df.empty:
@@ -496,7 +479,6 @@ def main():
     
     st.markdown("---")
     
-    # Overall Metrics
     st.markdown("### Overall Accuracy Metrics")
     
     mae_metrics = calculate_mae_metrics(df)
@@ -513,7 +495,6 @@ def main():
     
     st.markdown("---")
     
-    # Performance Over Time
     st.markdown("### Performance Over Time")
     
     period_map = {'Daily': 'daily', 'Weekly': 'weekly', 'Monthly': 'monthly'}
@@ -526,7 +507,6 @@ def main():
     
     st.markdown("---")
     
-    # Prediction vs Actual Charts
     st.markdown("### Prediction vs Actual Analysis")
     
     selected_stat = st.selectbox(

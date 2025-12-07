@@ -104,6 +104,14 @@ def calculate_team_ratings():
                     pace
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (team_id, season) DO UPDATE SET
+                    games_played = EXCLUDED.games_played,
+                    wins = EXCLUDED.wins,
+                    losses = EXCLUDED.losses,
+                    offensive_rating = EXCLUDED.offensive_rating,
+                    defensive_rating = EXCLUDED.defensive_rating,
+                    net_rating = EXCLUDED.net_rating,
+                    pace = EXCLUDED.pace
             """, (
                 team_id,
                 season,
@@ -124,6 +132,7 @@ def calculate_team_ratings():
                 
         except Exception as e:
             print(f"Error inserting team {team_id} season {season}: {e}")
+            conn.rollback()
             continue
     
     conn.commit()

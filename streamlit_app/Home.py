@@ -491,13 +491,20 @@ def load_custom_css():
             background: linear-gradient(135deg, #2d2d2d 0%, #252525 100%);
             border: 1px solid #3d3d3d;
             border-radius: 10px;
-            padding: 1.25rem;
+            padding: 1rem 1.25rem;
             margin-bottom: 0.5rem;
+            margin-top: 0;
             display: flex;
             align-items: center;
             gap: 1.5rem;
             transition: all 0.2s ease;
+            height: auto;
             min-height: 70px;
+            max-height: none;
+            overflow: hidden;
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 100%;
         }
         
         .player-row:hover {
@@ -510,16 +517,23 @@ def load_custom_css():
             align-items: center;
             gap: 1rem;
             min-width: 200px;
+            overflow: hidden;
+            flex-shrink: 0;
         }
         
         .player-photo {
             width: 70px;
             height: 70px;
+            min-width: 70px;
+            min-height: 70px;
+            max-width: 70px;
+            max-height: 70px;
             border-radius: 50%;
             border: 3px solid #d4af37;
             object-fit: cover;
             background: #1e1e1e;
             box-shadow: 0 2px 8px rgba(212, 175, 55, 0.3);
+            flex-shrink: 0;
         }
         
         .player-details {
@@ -573,6 +587,18 @@ def load_custom_css():
             gap: 1rem;
             flex: 1;
             align-items: center;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        
+        .stat-card {
+            text-align: center;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
         }
         
         .stats-grid-with-button {
@@ -581,10 +607,6 @@ def load_custom_css():
             gap: 1rem;
             flex: 1;
             align-items: center;
-        }
-        
-        .stat-card {
-            text-align: center;
         }
         
         .stat-label {
@@ -691,6 +713,9 @@ def load_custom_css():
         div[data-testid="stHorizontalBlock"]:has(.player-row) {
             display: flex !important;
             align-items: stretch !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
         }
         
         /* Make both columns stretch to match the tallest content */
@@ -699,6 +724,36 @@ def load_custom_css():
             display: flex !important;
             flex-direction: column !important;
             align-items: stretch !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            overflow: visible !important;
+        }
+        
+        /* Ensure player-row container doesn't overflow */
+        div[data-testid="column"]:has(.player-row) > div {
+            width: 100% !important;
+            max-width: 100% !important;
+            overflow: visible !important;
+        }
+        
+        /* Prevent container from cutting off content */
+        div[data-testid="stVerticalBlock"]:has(.player-row) {
+            overflow: visible !important;
+            min-height: auto !important;
+        }
+        
+        div[data-testid="element-container"]:has(.player-row) {
+            overflow: visible !important;
+            padding: 0 !important;
+            min-height: auto !important;
+            max-height: none !important;
+        }
+        
+        /* Ensure markdown containers don't clip content */
+        div[data-testid="stMarkdownContainer"]:has(.player-row) {
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 !important;
         }
         
         /* Make the button column's inner div stretch */
@@ -714,14 +769,13 @@ def load_custom_css():
             min-width: 60px !important;
             width: 60px !important;
             min-height: 70px !important;
-            height: 100% !important;
             font-size: 0.75rem !important;
             white-space: normal !important;
             line-height: 1.2 !important;
             padding: 0.5rem 0.25rem !important;
             word-break: break-word !important;
-            flex: 1 1 100% !important;
             align-self: stretch !important;
+            box-sizing: border-box !important;
         }
         
         div[data-testid="column"] {
@@ -769,7 +823,6 @@ def load_custom_css():
         }
         </style>
         <script>
-        // Match button height to player-row height + actuals-row if visible
         function matchButtonHeights() {
             document.querySelectorAll('.player-row[data-prediction-id]').forEach(function(playerRow) {
                 const predictionId = playerRow.getAttribute('data-prediction-id');
@@ -777,54 +830,57 @@ def load_custom_css():
                 if (rowParent) {
                     const button = rowParent.querySelector('button[key^="actuals_btn_"]');
                     if (button) {
-                        // Start with player-row height
-                        let totalHeight = playerRow.offsetHeight;
+                        const playerCardColumn = playerRow.closest('[data-testid="column"]');
+                        let totalHeight = 0;
                         
-                        // Find the actuals-row with matching prediction-id
-                        const actualsRow = document.querySelector('.actuals-row[data-prediction-id="' + predictionId + '"]');
-                        if (actualsRow) {
-                            // Check if it's visible
-                            const rect = actualsRow.getBoundingClientRect();
-                            const style = window.getComputedStyle(actualsRow);
-                            if (rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden') {
-                                // Get positions
-                                const rowParentRect = rowParent.getBoundingClientRect();
+                        if (playerCardColumn) {
+                            const actualsRow = document.querySelector('.actuals-row[data-prediction-id="' + predictionId + '"]');
+                            
+                            if (actualsRow) {
                                 const actualsRect = actualsRow.getBoundingClientRect();
-                                
-                                // Calculate total height from top of rowParent to bottom of actualsRow
-                                // Add any margin between them
-                                const margin = parseInt(style.marginTop) || 0;
-                                totalHeight = (actualsRect.bottom - rowParentRect.top) + margin;
+                                const actualsStyle = window.getComputedStyle(actualsRow);
+                                if (actualsRect.height > 0 && actualsStyle.display !== 'none' && actualsStyle.visibility !== 'hidden') {
+                                    let container = playerCardColumn.parentElement;
+                                    while (container && !container.contains(actualsRow)) {
+                                        container = container.parentElement;
+                                    }
+                                    
+                                    if (container) {
+                                        const containerRect = container.getBoundingClientRect();
+                                        totalHeight = containerRect.height;
+                                    } else {
+                                        const playerRowRect = playerRow.getBoundingClientRect();
+                                        totalHeight = (actualsRect.bottom - playerRowRect.top);
+                                    }
+                                } else {
+                                    totalHeight = playerRow.offsetHeight;
+                                }
+                            } else {
+                                totalHeight = playerRow.offsetHeight;
                             }
-                        }
-                        
-                        const buttonColumn = button.closest('[data-testid="column"]');
-                        if (buttonColumn) {
-                            // Set height on both column and button
-                            buttonColumn.style.height = totalHeight + 'px';
-                            button.style.height = totalHeight + 'px';
-                            button.style.minHeight = totalHeight + 'px';
+                            
+                            if (totalHeight > 0) {
+                                button.style.height = totalHeight + 'px';
+                                button.style.minHeight = totalHeight + 'px';
+                                button.style.maxHeight = totalHeight + 'px';
+                            }
                         }
                     }
                 }
             });
         }
         
-        // Run on page load and after any updates
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', matchButtonHeights);
         } else {
             matchButtonHeights();
         }
         
-        // Also run after a short delay to catch dynamically loaded content
         setTimeout(matchButtonHeights, 100);
         setTimeout(matchButtonHeights, 500);
         setTimeout(matchButtonHeights, 1000);
         
-        // Use MutationObserver to watch for DOM changes
         const observer = new MutationObserver(function(mutations) {
-            // Debounce the function to avoid too many calls
             clearTimeout(window.matchButtonTimeout);
             window.matchButtonTimeout = setTimeout(matchButtonHeights, 50);
         });
@@ -868,6 +924,98 @@ def load_games_for_date(target_date):
         st.error(f"Error loading games: {str(e)}")
         return pd.DataFrame()
 
+def get_all_players():
+    try:
+        conn = get_db_connection()
+        query = """
+            SELECT DISTINCT
+                pl.player_id,
+                pl.full_name,
+                t.abbreviation as team_abbr
+            FROM predictions p
+            JOIN players pl ON p.player_id = pl.player_id
+            JOIN teams t ON pl.team_id = t.team_id
+            ORDER BY pl.full_name
+        """
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
+def get_all_teams():
+    try:
+        conn = get_db_connection()
+        query = """
+            SELECT DISTINCT
+                t.team_id,
+                t.abbreviation,
+                t.full_name,
+                t.city
+            FROM teams t
+            JOIN players p ON t.team_id = p.team_id
+            JOIN predictions pred ON p.player_id = pred.player_id
+            ORDER BY t.full_name
+        """
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
+def normalize_team_search(search_term):
+    if not search_term:
+        return ""
+    
+    search_lower = search_term.lower().strip()
+    
+    team_mappings = {
+        'lakers': 'LAL',
+        'celtics': 'BOS',
+        'warriors': 'GSW',
+        'bulls': 'CHI',
+        'heat': 'MIA',
+        'knicks': 'NYK',
+        'nets': 'BKN',
+        '76ers': 'PHI',
+        'sixers': 'PHI',
+        'raptors': 'TOR',
+        'wizards': 'WAS',
+        'hawks': 'ATL',
+        'hornets': 'CHA',
+        'cavaliers': 'CLE',
+        'cavs': 'CLE',
+        'pistons': 'DET',
+        'pacers': 'IND',
+        'bucks': 'MIL',
+        'magic': 'ORL',
+        'suns': 'PHX',
+        'blazers': 'POR',
+        'trail blazers': 'POR',
+        'kings': 'SAC',
+        'spurs': 'SAS',
+        'thunder': 'OKC',
+        'jazz': 'UTA',
+        'nuggets': 'DEN',
+        'timberwolves': 'MIN',
+        'twolves': 'MIN',
+        'pelicans': 'NOP',
+        'mavericks': 'DAL',
+        'mavs': 'DAL',
+        'rockets': 'HOU',
+        'grizzlies': 'MEM',
+        'clippers': 'LAC',
+        'lakers': 'LAL'
+    }
+    
+    if search_lower in team_mappings:
+        return team_mappings[search_lower]
+    
+    if len(search_term) == 3 and search_term.isupper():
+        return search_term
+    
+    return search_term
+
 def load_todays_predictions(target_date, search_query="", team_search="", position_filter="All Positions", game_filter="All Games"):
     try:
         conn = get_db_connection()
@@ -879,9 +1027,15 @@ def load_todays_predictions(target_date, search_query="", team_search="", positi
             params.append(f"%{search_query}%")
         
         if team_search:
-            search_filters.append("(LOWER(t1.abbreviation) LIKE LOWER(%s) OR LOWER(t1.full_name) LIKE LOWER(%s))")
-            params.append(f"%{team_search}%")
-            params.append(f"%{team_search}%")
+            normalized_team = normalize_team_search(team_search)
+            if normalized_team and len(normalized_team) == 3:
+                search_filters.append("LOWER(t1.abbreviation) = LOWER(%s)")
+                params.append(normalized_team)
+            else:
+                search_filters.append("(LOWER(t1.abbreviation) LIKE LOWER(%s) OR LOWER(t1.full_name) LIKE LOWER(%s) OR LOWER(t1.city) LIKE LOWER(%s))")
+                params.append(f"%{team_search}%")
+                params.append(f"%{team_search}%")
+                params.append(f"%{team_search}%")
         
         if position_filter != "All Positions":
             if position_filter == "Guard":
@@ -1101,7 +1255,7 @@ def main():
         st.rerun()
     
     if st.session_state.show_info:
-        info_html = """<div class="info-modal"><h3>Model Overview</h3><p>Our predictions use <strong>XGBoost</strong>, a gradient boosting machine learning algorithm, trained on historical NBA player performance data. We maintain separate models for each statistic (Points, Rebounds, Assists, Steals, Blocks, Turnovers, and 3-Pointers Made). All features are standardized (z-score normalization) to ensure fair comparison across different scales.</p><br><h3>Features Used</h3><ul><li><strong>Recent Form:</strong> Rolling averages from last 5, 10, and 20 games for points, rebounds, and assists. We use both unweighted averages and exponentially weighted averages where more recent games are weighted more heavily (exponential decay factor of 0.1). This captures both overall recent performance and recency trends.</li><li><strong>Game Context:</strong> Home/away status (home court advantage), days of rest between games, and whether it's a back-to-back game. These factors significantly impact player performance and fatigue levels.</li><li><strong>Team Ratings:</strong> Offensive rating (points per 100 possessions), defensive rating (points allowed per 100 possessions), and pace (possessions per game) for both the player's team and opponent. These metrics capture team strength and playing style.</li><li><strong>Opponent Defense:</strong> Field goal percentage and 3-point percentage allowed by the opposing team. Stronger defensive teams typically limit individual player production.</li><li><strong>Teammate Impact:</strong> Whether star teammates (20+ PPG) are injured or out. When star players are unavailable, other players often see increased usage and production opportunities.</li><li><strong>Playoff Experience:</strong> Career playoff games played and playoff performance boost (difference between playoff and regular season scoring averages). These features are only applied when predicting playoff games, as playoff basketball has different intensity and defensive schemes.</li><li><strong>Altitude:</strong> Arena altitude effects for away games. High-altitude venues (above 3000 feet) can impact player performance due to reduced oxygen levels, particularly affecting endurance and shooting accuracy.</li></ul><br><h3>Confidence Score</h3><p>The confidence score (0-100%) indicates prediction reliability based on:</p><ul><li>Player's recent game history and consistency (lower variance = higher confidence)</li><li>Availability of required features (missing data reduces confidence)</li><li>Number of games played in the season (more games = more reliable patterns)</li><li>Contextual factors (back-to-back games, injuries, altitude reduce confidence)</li></ul><br><h3>Accuracy Metrics</h3><p>When actual game results are available, we calculate:</p><ul><li><strong>Error:</strong> Average absolute error across all 7 statistics</li><li><strong>% Accurate:</strong> Calculated as 100 - (|Total Predicted - Total Actual| / Total Actual) × 100, where totals are the sum of all 7 statistics (Points, Rebounds, Assists, Steals, Blocks, Turnovers, 3-Pointers). This measures how close the combined predicted stats are to the combined actual stats.</li></ul><br><h3>View Actuals</h3><p>The "View Actuals" button appears for past games where actual statistics are available. It shows a comparison between predicted and actual performance, including the difference for each statistic.</p></div>"""
+        info_html = """<div class="info-modal"><h3>Model Overview</h3><p>Our predictions use <strong>XGBoost</strong>, a gradient boosting machine learning algorithm, trained on historical NBA player performance data. We maintain separate models for each statistic (Points, Rebounds, Assists, Steals, Blocks, Turnovers, and 3-Pointers Made). All features are standardized (z-score normalization) to ensure fair comparison across different scales.</p><br><h3>Features Used</h3><ul><li><strong>Recent Form:</strong> Rolling averages from last 5, 10, and 20 games for points, rebounds, and assists. We use both unweighted averages and exponentially weighted averages where more recent games are weighted more heavily (exponential decay factor of 0.1). This captures both overall recent performance and recency trends.</li><li><strong>Game Context:</strong> Home/away status (home court advantage), days of rest between games, and whether it's a back-to-back game. These factors significantly impact player performance and fatigue levels.</li><li><strong>Team Ratings:</strong> Offensive rating (points per 100 possessions), defensive rating (points allowed per 100 possessions), and pace (possessions per game) for both the player's team and opponent. These metrics capture team strength and playing style.</li><li><strong>Opponent Defense:</strong> Field goal percentage and 3-point percentage allowed by the opposing team. Stronger defensive teams typically limit individual player production.</li><li><strong>Position-Specific Defense:</strong> Points, rebounds, assists, steals, blocks, turnovers forced, and three-pointers made allowed per game by the opposing team to the player's position (Guard, Forward, or Center). This captures how well teams defend against specific positions, which is crucial since different positions have different roles and production patterns. For example, a guard facing a team that struggles to defend guards will likely see increased production opportunities.</li><li><strong>Teammate Impact:</strong> Whether star teammates (20+ PPG) are injured or out. When star players are unavailable, other players often see increased usage and production opportunities.</li><li><strong>Playoff Experience:</strong> Career playoff games played and playoff performance boost (difference between playoff and regular season scoring averages). These features are only applied when predicting playoff games, as playoff basketball has different intensity and defensive schemes.</li><li><strong>Altitude:</strong> Arena altitude effects for away games. High-altitude venues (above 3000 feet) can impact player performance due to reduced oxygen levels, particularly affecting endurance and shooting accuracy.</li></ul><br><h3>Confidence Score</h3><p>The confidence score (0-100%) indicates prediction reliability based on:</p><ul><li>Player's recent game history and consistency (lower variance = higher confidence)</li><li>Availability of required features (missing data reduces confidence)</li><li>Number of games played in the season (more games = more reliable patterns)</li><li>Contextual factors (back-to-back games, injuries, altitude reduce confidence)</li></ul><br><h3>Accuracy Metrics</h3><p>When actual game results are available, we calculate:</p><ul><li><strong>Error:</strong> Average absolute error across all 7 statistics</li><li><strong>% Accurate:</strong> Calculated as 100 - (|Total Predicted - Total Actual| / Total Actual) × 100, where totals are the sum of all 7 statistics (Points, Rebounds, Assists, Steals, Blocks, Turnovers, 3-Pointers). This measures how close the combined predicted stats are to the combined actual stats.</li></ul><br><h3>View Actuals</h3><p>The "View Actuals" button appears for past games where actual statistics are available. It shows a comparison between predicted and actual performance, including the difference for each statistic.</p></div>"""
         st.markdown(info_html, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
@@ -1131,10 +1285,19 @@ def main():
 
     col4, col5, col6 = st.columns(3)
     with col4:
-        search_query = st.text_input("Search Player", placeholder="e.g. LeBron James")
+        all_players_df = get_all_players()
+        player_options = ["All Players"] + [f"{row['full_name']} ({row['team_abbr']})" for _, row in all_players_df.iterrows()]
+        selected_player_display = st.selectbox("Search Player", player_options, key="player_search")
+        search_query = "" if selected_player_display == "All Players" else selected_player_display.split(" (")[0]
 
     with col5:
-        team_search = st.text_input("Search Team", placeholder="e.g. LAL")
+        all_teams_df = get_all_teams()
+        team_options = ["All Teams"] + [f"{row['abbreviation']} - {row['full_name']}" for _, row in all_teams_df.iterrows()]
+        selected_team_display = st.selectbox("Search Team", team_options, key="team_search")
+        if selected_team_display == "All Teams":
+            team_search = ""
+        else:
+            team_search = selected_team_display.split(" - ")[0] if " - " in selected_team_display else selected_team_display
 
     with col6:
         position_filter = st.selectbox(
@@ -1223,11 +1386,17 @@ def main():
                 team1_players = game_group[game_group['team_abbr'] == team1_abbr]
                 team2_players = game_group[game_group['team_abbr'] == team2_abbr]
 
-                display_players(team1_players, target_date)
+                if len(team1_players) > 0:
+                    display_players(team1_players, target_date)
+                else:
+                    st.markdown(f'<div style="text-align: center; color: #888; padding: 2rem;"><em>No Valid Predictions</em></div>', unsafe_allow_html=True)
 
                 if len(team2_players) > 0:
                     st.markdown(f'<div class="team-divider"><span class="team-divider-label">{team2_abbr}</span></div>', unsafe_allow_html=True)
                     display_players(team2_players, target_date)
+                elif len(team1_players) > 0:
+                    st.markdown(f'<div class="team-divider"><span class="team-divider-label">{team2_abbr}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="text-align: center; color: #888; padding: 2rem;"><em>No Valid Predictions</em></div>', unsafe_allow_html=True)
             else:
                 filtered_players = game_group[game_group['team_abbr'] == current_filter]
                 display_players(filtered_players, target_date)

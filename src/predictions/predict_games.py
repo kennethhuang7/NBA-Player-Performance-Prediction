@@ -27,7 +27,9 @@ def calculate_confidence(features_df, recent_games_df):
     
     required = ['points_l5', 'points_l10', 'is_home', 'days_rest', 
                 'offensive_rating_team', 'defensive_rating_opp']
-    available = sum(1 for feat in required if feat in features_df.columns)
+    available = sum(1 for feat in required 
+                   if feat in features_df.columns 
+                   and not pd.isna(features_df[feat].iloc[0]))
     score += (available / len(required)) * 20
     
     games = len(recent_games_df)
@@ -166,10 +168,15 @@ def predict_upcoming_games(target_date=None):
                     
                     if len(features_ordered.columns) != len(model_feature_names):
                         missing = set(model_feature_names) - set(features_ordered.columns)
-                        print(f"Warning: Missing features for {stat_name}: {missing}")
+                        missing = {col for col in missing if 'team_id' not in col and 'player_id' not in col and 'game_id' not in col}
+                        if missing:
+                            print(f"Warning: Missing features for {stat_name}: {missing}")
                         for col in missing:
                             features_ordered[col] = 0
-                        features_ordered = features_ordered[model_feature_names]
+                        available_model_cols = [col for col in model_feature_names if col in features_ordered.columns]
+                        features_ordered = features_ordered[available_model_cols]
+                    
+                    features_ordered = features_ordered.fillna(0)
                     
                     if scalers[stat_name] is not None:
                         features_scaled = pd.DataFrame(
@@ -370,10 +377,6 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
         features['offensive_rating_team'] = team_ratings.iloc[0]['offensive_rating']
         features['defensive_rating_team'] = team_ratings.iloc[0]['defensive_rating']
         features['pace_team'] = team_ratings.iloc[0]['pace']
-    else:
-        features['offensive_rating_team'] = 110
-        features['defensive_rating_team'] = 110
-        features['pace_team'] = 100
     
     opp_ratings = pd.read_sql(f"""
         SELECT offensive_rating, defensive_rating, pace
@@ -385,10 +388,6 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
         features['offensive_rating_opp'] = opp_ratings.iloc[0]['offensive_rating']
         features['defensive_rating_opp'] = opp_ratings.iloc[0]['defensive_rating']
         features['pace_opp'] = opp_ratings.iloc[0]['pace']
-    else:
-        features['offensive_rating_opp'] = 110
-        features['defensive_rating_opp'] = 110
-        features['pace_opp'] = 100
     
     opp_defense = pd.read_sql(f"""
         SELECT opp_field_goal_pct, opp_three_point_pct
@@ -399,9 +398,46 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
     if len(opp_defense) > 0:
         features['opp_field_goal_pct'] = opp_defense.iloc[0]['opp_field_goal_pct']
         features['opp_three_point_pct'] = opp_defense.iloc[0]['opp_three_point_pct']
+    
+    player_position_query = pd.read_sql(f"""
+        SELECT position
+        FROM players
+        WHERE player_id = {player_id}
+    """, conn)
+    
+    if len(player_position_query) > 0:
+        player_position = str(player_position_query.iloc[0]['position'] or '').upper().strip()
+        if ('CENTER' in player_position or player_position == 'C') and 'GUARD' not in player_position and 'FORWARD' not in player_position:
+            defense_position = 'C'
+        elif 'FORWARD' in player_position or player_position == 'F' or player_position == 'F-C':
+            defense_position = 'F'
+        elif 'GUARD' in player_position or player_position == 'G' or player_position == 'G-F':
+            defense_position = 'G'
+        else:
+            defense_position = 'G'
     else:
-        features['opp_field_goal_pct'] = 45
-        features['opp_three_point_pct'] = 35
+        defense_position = 'G'
+    
+    pos_defense = pd.read_sql(f"""
+        SELECT points_allowed_per_game,
+               rebounds_allowed_per_game,
+               assists_allowed_per_game,
+               steals_allowed_per_game,
+               blocks_allowed_per_game,
+               turnovers_forced_per_game,
+               three_pointers_made_allowed_per_game
+        FROM position_defense_stats
+        WHERE team_id = {opponent_id} AND season = '{season}' AND position = '{defense_position}'
+    """, conn)
+    
+    if len(pos_defense) > 0:
+        features['opp_points_allowed_to_position'] = pos_defense.iloc[0]['points_allowed_per_game']
+        features['opp_rebounds_allowed_to_position'] = pos_defense.iloc[0]['rebounds_allowed_per_game']
+        features['opp_assists_allowed_to_position'] = pos_defense.iloc[0]['assists_allowed_per_game']
+        features['opp_steals_allowed_to_position'] = pos_defense.iloc[0]['steals_allowed_per_game']
+        features['opp_blocks_allowed_to_position'] = pos_defense.iloc[0]['blocks_allowed_per_game']
+        features['opp_turnovers_forced_to_position'] = pos_defense.iloc[0]['turnovers_forced_per_game']
+        features['opp_three_pointers_allowed_to_position'] = pos_defense.iloc[0]['three_pointers_made_allowed_per_game']
     
     altitude_query = pd.read_sql(f"""
         SELECT arena_altitude
@@ -411,13 +447,9 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
     
     if len(altitude_query) > 0:
         altitude = altitude_query.iloc[0]['arena_altitude']
-        features['team_id_opp_venue'] = opponent_id
-        features['arena_altitude'] = altitude
-        features['altitude_away'] = 1 if (is_home == 0 and altitude > 3000) else 0
-    else:
-        features['team_id_opp_venue'] = opponent_id
-        features['arena_altitude'] = 0
-        features['altitude_away'] = 0
+        if altitude:
+            features['arena_altitude'] = altitude
+            features['altitude_away'] = 1 if (is_home == 0 and altitude > 3000) else 0
     
     star_query = f"""
         SELECT DISTINCT pgs2.player_id, AVG(pgs2.points) as ppg
@@ -494,11 +526,18 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
         'offensive_rating_team', 'defensive_rating_team', 'pace_team',
         'offensive_rating_opp', 'defensive_rating_opp', 'pace_opp',
         'opp_field_goal_pct', 'opp_three_point_pct',
-        'team_id_opp_venue', 'arena_altitude', 'altitude_away'
+        'opp_points_allowed_to_position', 'opp_rebounds_allowed_to_position',
+        'opp_assists_allowed_to_position', 'opp_steals_allowed_to_position',
+        'opp_blocks_allowed_to_position', 'opp_turnovers_forced_to_position',
+        'opp_three_pointers_allowed_to_position',
+        'arena_altitude', 'altitude_away'
     ]
     
     available_cols = [col for col in column_order if col in features_df.columns]
     features_df = features_df[available_cols]
+    
+    if 'team_id_opp_venue' in features_df.columns:
+        features_df = features_df.drop(columns=['team_id_opp_venue'])
     
     return features_df, recent_games
 

@@ -28,6 +28,8 @@ def train_xgboost_models():
                 'offensive_rating', 'defensive_rating', 'pace', 'opp_', 'altitude', 'playoff',
                 'star_teammate', 'games_without_star'])]
     
+    feature_cols = [col for col in feature_cols if 'team_id' not in col and 'player_id' not in col and 'game_id' not in col]
+    
     X = df[feature_cols].fillna(0)
     
     targets = {
