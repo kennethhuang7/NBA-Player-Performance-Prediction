@@ -27,22 +27,10 @@ def show_navigation():
         function hideStreamlitAppTitle() {
             const sidebar = document.querySelector('[data-testid="stSidebar"]');
             if (sidebar) {
-                const firstChild = sidebar.firstElementChild;
-                if (firstChild && firstChild.firstElementChild) {
-                    const secondChild = firstChild.firstElementChild;
-                    if (secondChild.textContent && secondChild.textContent.trim().toLowerCase().includes('streamlit')) {
-                        secondChild.style.display = 'none';
-                        secondChild.style.visibility = 'hidden';
-                        secondChild.style.height = '0';
-                        secondChild.style.margin = '0';
-                        secondChild.style.padding = '0';
-                        secondChild.style.overflow = 'hidden';
-                    }
-                }
-                const allElements = sidebar.querySelectorAll('*');
+                const allElements = sidebar.querySelectorAll('p, div, span, h1, h2, h3, h4, h5, h6');
                 allElements.forEach(el => {
-                    const text = el.textContent || el.innerText || '';
-                    if (text.trim().toLowerCase() === 'streamlit app' || text.trim().toLowerCase().includes('streamlit app')) {
+                    const text = (el.textContent || el.innerText || '').trim().toLowerCase();
+                    if (text === 'streamlit app' && !el.closest('[data-testid="stMarkdownContainer"]:has(h2)')) {
                         el.style.display = 'none';
                         el.style.visibility = 'hidden';
                         el.style.height = '0';
@@ -50,18 +38,28 @@ def show_navigation():
                         el.style.padding = '0';
                         el.style.overflow = 'hidden';
                         el.style.fontSize = '0';
+                        el.style.lineHeight = '0';
                     }
                 });
+                const firstMarkdown = sidebar.querySelector('[data-testid="stMarkdownContainer"]:first-of-type');
+                if (firstMarkdown) {
+                    const text = (firstMarkdown.textContent || firstMarkdown.innerText || '').trim().toLowerCase();
+                    if (text === 'streamlit app') {
+                        firstMarkdown.style.display = 'none';
+                        firstMarkdown.style.visibility = 'hidden';
+                        firstMarkdown.style.height = '0';
+                        firstMarkdown.style.margin = '0';
+                        firstMarkdown.style.padding = '0';
+                    }
+                }
             }
         }
         hideStreamlitAppTitle();
-        setTimeout(hideStreamlitAppTitle, 10);
         setTimeout(hideStreamlitAppTitle, 50);
         setTimeout(hideStreamlitAppTitle, 100);
-        setTimeout(hideStreamlitAppTitle, 200);
+        setTimeout(hideStreamlitAppTitle, 300);
         setTimeout(hideStreamlitAppTitle, 500);
         setTimeout(hideStreamlitAppTitle, 1000);
-        setTimeout(hideStreamlitAppTitle, 2000);
         
         const observer = new MutationObserver(function(mutations) {
             hideStreamlitAppTitle();
@@ -71,13 +69,9 @@ def show_navigation():
             observer.observe(sidebar, { 
                 childList: true, 
                 subtree: true,
-                characterData: true,
-                attributes: true
+                characterData: true
             });
         }
-        
-        document.addEventListener('DOMContentLoaded', hideStreamlitAppTitle);
-        window.addEventListener('load', hideStreamlitAppTitle);
     })();
     </script>
     """, unsafe_allow_html=True)
@@ -156,19 +150,6 @@ def load_custom_css():
             background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
             padding-top: 0 !important;
             margin: 0 !important;
-        }
-        
-        [data-testid="stSidebar"] > div:first-child > div:first-child,
-        [data-testid="stSidebar"] > div:first-child > div:first-child > *,
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"]:first-child,
-        [data-testid="stSidebar"] p:first-of-type,
-        [data-testid="stSidebar"] > div:first-child {
-            display: none !important;
-            visibility: hidden !important;
-            height: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
         }
         
         .subtitle {
