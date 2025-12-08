@@ -17,7 +17,10 @@ def train_catboost_models():
     print("Training CatBoost models for NBA player predictions...\n")
     
     print("Loading features...")
-    df = pd.read_csv('../../data/processed/training_features.csv')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    features_path = os.path.join(project_root, 'data', 'processed', 'training_features.csv')
+    df = pd.read_csv(features_path)
     print(f"Loaded {len(df)} records\n")
     
     df = df.dropna(subset=['points_l5', 'points_l10'])
@@ -42,7 +45,10 @@ def train_catboost_models():
         'three_pointers_made': 'three_pointers_made'
     }
     
-    os.makedirs('../../data/models', exist_ok=True)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    models_dir = os.path.join(project_root, 'data', 'models')
+    os.makedirs(models_dir, exist_ok=True)
     
     results = {}
     
@@ -108,8 +114,8 @@ def train_catboost_models():
         
         final_model.fit(X_scaled, y)
         
-        model_path = f'../../data/models/catboost_{target_name}.pkl'
-        scaler_path = f'../../data/models/scaler_catboost_{target_name}.pkl'
+        model_path = os.path.join(models_dir, f'catboost_{target_name}.pkl')
+        scaler_path = os.path.join(models_dir, f'scaler_catboost_{target_name}.pkl')
         
         joblib.dump(final_model, model_path)
         joblib.dump(scaler, scaler_path)

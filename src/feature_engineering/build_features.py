@@ -2,6 +2,12 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_collection.utils import get_db_connection
+from feature_engineering.team_stats_calculator import (
+    calculate_team_ratings_as_of_date,
+    calculate_team_defensive_stats_as_of_date,
+    calculate_position_defense_stats_as_of_date,
+    map_position_to_defense_position
+)
 import pandas as pd
 import numpy as np
 
@@ -128,103 +134,146 @@ def build_features_for_training():
     print("  - Games played")
     df['games_played_season'] = df.groupby(['player_id', 'season']).cumcount() + 1
     
-    print("  - Team ratings")
-    team_ratings = pd.read_sql("""
-        SELECT team_id, season, offensive_rating, defensive_rating, pace
-        FROM team_ratings
-    """, conn)
-    
-    df = df.merge(
-        team_ratings.rename(columns={
-            'offensive_rating': 'offensive_rating_team',
-            'defensive_rating': 'defensive_rating_team',
-            'pace': 'pace_team'
-        }),
-        left_on=['team_id', 'season'],
-        right_on=['team_id', 'season'],
-        how='left'
-    )
-    
-    print("  - Opponent ratings")
+    print("  - Opponent ID")
     df['opponent_id'] = df.apply(
         lambda row: row['away_team_id'] if row['is_home'] == 1 else row['home_team_id'],
         axis=1
     )
     
-    df = df.merge(
-        team_ratings.rename(columns={
+    print("  - Defense position mapping")
+    df['defense_position'] = df['position'].apply(map_position_to_defense_position)
+    
+    print("  - Team ratings")
+    print("     This may take a few minutes...")
+    
+    team_date_combos = df[['team_id', 'season', 'game_date']].drop_duplicates()
+    team_ratings_list = []
+    total_combos = len(team_date_combos)
+    
+    for i, (idx, row) in enumerate(team_date_combos.iterrows(), 1):
+        if i % 100 == 0 or i == total_combos:
+            print(f"     Processing team ratings: {i}/{total_combos} ({i/total_combos*100:.1f}%)")
+        ratings = calculate_team_ratings_as_of_date(
+            conn, row['team_id'], row['season'], row['game_date']
+        )
+        if ratings:
+            ratings['team_id'] = row['team_id']
+            ratings['season'] = row['season']
+            ratings['game_date'] = row['game_date']
+            team_ratings_list.append(ratings)
+    
+    if team_ratings_list:
+        team_ratings_df = pd.DataFrame(team_ratings_list)
+        team_ratings_df = team_ratings_df.rename(columns={
+            'offensive_rating': 'offensive_rating_team',
+            'defensive_rating': 'defensive_rating_team',
+            'pace': 'pace_team'
+        })
+        df = df.merge(
+            team_ratings_df,
+            on=['team_id', 'season', 'game_date'],
+            how='left'
+        )
+    else:
+        df['offensive_rating_team'] = None
+        df['defensive_rating_team'] = None
+        df['pace_team'] = None
+    
+    print("  - Opponent ratings (calculating as-of each game date)...")
+    opp_date_combos = df[['opponent_id', 'season', 'game_date']].drop_duplicates()
+    opp_ratings_list = []
+    total_opp = len(opp_date_combos)
+    
+    for i, (idx, row) in enumerate(opp_date_combos.iterrows(), 1):
+        if i % 100 == 0 or i == total_opp:
+            print(f"     Processing opponent ratings: {i}/{total_opp} ({i/total_opp*100:.1f}%)")
+        ratings = calculate_team_ratings_as_of_date(
+            conn, row['opponent_id'], row['season'], row['game_date']
+        )
+        if ratings:
+            ratings['opponent_id'] = row['opponent_id']
+            ratings['season'] = row['season']
+            ratings['game_date'] = row['game_date']
+            opp_ratings_list.append(ratings)
+    
+    if opp_ratings_list:
+        opp_ratings_df = pd.DataFrame(opp_ratings_list)
+        opp_ratings_df = opp_ratings_df.rename(columns={
             'offensive_rating': 'offensive_rating_opp',
             'defensive_rating': 'defensive_rating_opp',
             'pace': 'pace_opp'
-        }),
-        left_on=['opponent_id', 'season'],
-        right_on=['team_id', 'season'],
-        how='left',
-        suffixes=('', '_opp_ratings')
-    )
+        })
+        df = df.merge(
+            opp_ratings_df,
+            on=['opponent_id', 'season', 'game_date'],
+            how='left'
+        )
+    else:
+        df['offensive_rating_opp'] = None
+        df['defensive_rating_opp'] = None
+        df['pace_opp'] = None
     
-    print("  - Opponent defense")
-    opp_defense = pd.read_sql("""
-        SELECT team_id, season, 
-               opp_field_goal_pct,
-               opp_three_point_pct
-        FROM team_defensive_stats
-    """, conn)
+    print("  - Opponent defense stats (calculating as-of each game date)...")
+    opp_def_date_combos = df[['opponent_id', 'season', 'game_date']].drop_duplicates()
+    opp_def_list = []
+    total_def = len(opp_def_date_combos)
     
-    df = df.merge(
-        opp_defense,
-        left_on=['opponent_id', 'season'],
-        right_on=['team_id', 'season'],
-        how='left',
-        suffixes=('', '_oppdef')
-    )
+    for i, (idx, row) in enumerate(opp_def_date_combos.iterrows(), 1):
+        if i % 100 == 0 or i == total_def:
+            print(f"     Processing opponent defense: {i}/{total_def} ({i/total_def*100:.1f}%)")
+        def_stats = calculate_team_defensive_stats_as_of_date(
+            conn, row['opponent_id'], row['season'], row['game_date']
+        )
+        if def_stats:
+            def_stats['opponent_id'] = row['opponent_id']
+            def_stats['season'] = row['season']
+            def_stats['game_date'] = row['game_date']
+            opp_def_list.append(def_stats)
     
-    print("  - Position-specific opponent defense")
-    def map_position_to_defense_position(pos):
-        if pd.isna(pos):
-            return 'G'
-        pos_str = str(pos).upper().strip()
-        if ('CENTER' in pos_str or pos_str == 'C') and 'GUARD' not in pos_str and 'FORWARD' not in pos_str:
-            return 'C'
-        elif 'FORWARD' in pos_str or pos_str == 'F' or pos_str == 'F-C':
-            return 'F'
-        elif 'GUARD' in pos_str or pos_str == 'G' or pos_str == 'G-F':
-            return 'G'
-        else:
-            return 'G'
+    if opp_def_list:
+        opp_def_df = pd.DataFrame(opp_def_list)
+        df = df.merge(
+            opp_def_df,
+            on=['opponent_id', 'season', 'game_date'],
+            how='left'
+        )
+    else:
+        df['opp_field_goal_pct'] = None
+        df['opp_three_point_pct'] = None
     
-    df['defense_position'] = df['position'].apply(map_position_to_defense_position)
+    print("  - Position-specific opponent defense (calculating as-of each game date)...")
+    pos_def_combos = df[['opponent_id', 'season', 'defense_position', 'game_date']].drop_duplicates()
+    pos_def_list = []
+    total_pos = len(pos_def_combos)
     
-    pos_defense = pd.read_sql("""
-        SELECT team_id, season, position,
-               points_allowed_per_game,
-               rebounds_allowed_per_game,
-               assists_allowed_per_game,
-               steals_allowed_per_game,
-               blocks_allowed_per_game,
-               turnovers_forced_per_game,
-               three_pointers_made_allowed_per_game
-        FROM position_defense_stats
-    """, conn)
+    for i, (idx, row) in enumerate(pos_def_combos.iterrows(), 1):
+        if i % 100 == 0 or i == total_pos:
+            print(f"     Processing position defense: {i}/{total_pos} ({i/total_pos*100:.1f}%)")
+        pos_stats = calculate_position_defense_stats_as_of_date(
+            conn, row['opponent_id'], row['season'], row['defense_position'], row['game_date']
+        )
+        if pos_stats:
+            pos_stats['opponent_id'] = row['opponent_id']
+            pos_stats['season'] = row['season']
+            pos_stats['defense_position'] = row['defense_position']
+            pos_stats['game_date'] = row['game_date']
+            pos_def_list.append(pos_stats)
     
-    df = df.merge(
-        pos_defense,
-        left_on=['opponent_id', 'season', 'defense_position'],
-        right_on=['team_id', 'season', 'position'],
-        how='left',
-        suffixes=('', '_pos_def')
-    )
-    
-    df = df.rename(columns={
-        'points_allowed_per_game': 'opp_points_allowed_to_position',
-        'rebounds_allowed_per_game': 'opp_rebounds_allowed_to_position',
-        'assists_allowed_per_game': 'opp_assists_allowed_to_position',
-        'steals_allowed_per_game': 'opp_steals_allowed_to_position',
-        'blocks_allowed_per_game': 'opp_blocks_allowed_to_position',
-        'turnovers_forced_per_game': 'opp_turnovers_forced_to_position',
-        'three_pointers_made_allowed_per_game': 'opp_three_pointers_allowed_to_position'
-    })
-    
+    if pos_def_list:
+        pos_def_df = pd.DataFrame(pos_def_list)
+        df = df.merge(
+            pos_def_df,
+            on=['opponent_id', 'season', 'defense_position', 'game_date'],
+            how='left'
+        )
+    else:
+        df['opp_points_allowed_to_position'] = None
+        df['opp_rebounds_allowed_to_position'] = None
+        df['opp_assists_allowed_to_position'] = None
+        df['opp_steals_allowed_to_position'] = None
+        df['opp_blocks_allowed_to_position'] = None
+        df['opp_turnovers_forced_to_position'] = None
+        df['opp_three_pointers_allowed_to_position'] = None
     
     df = df.drop(columns=['defense_position'], errors='ignore')
     
@@ -253,7 +302,9 @@ def build_features_for_training():
     print(f"Total records: {len(df)}")
     print(f"Records with star teammate out: {df['star_teammate_out'].sum()}")
     
-    output_path = '../../data/processed/training_features.csv'
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    output_path = os.path.join(project_root, 'data', 'processed', 'training_features.csv')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False)
     print(f"Saved: {output_path}")
