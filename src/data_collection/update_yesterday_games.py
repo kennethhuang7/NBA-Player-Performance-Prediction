@@ -176,6 +176,8 @@ def update_yesterday_games(target_date=None):
             
             minutes_played = parse_minutes(player['minutes'])
             
+            game_team_id = int(player['teamId'])
+            
             cur.execute("""
                 INSERT INTO player_game_stats (
                     game_id, player_id, team_id, minutes_played,
@@ -192,7 +194,7 @@ def update_yesterday_games(target_date=None):
             """, (
                 game_id,
                 player_id,
-                int(player['teamId']),
+                game_team_id,
                 minutes_played,
                 int(player['points']),
                 int(player['reboundsOffensive']),
@@ -211,6 +213,11 @@ def update_yesterday_games(target_date=None):
                 int(player['freeThrowsAttempted']),
                 int(player['plusMinusPoints'])
             ))
+            
+            cur.execute("SELECT team_id FROM players WHERE player_id = %s", (player_id,))
+            player_row = cur.fetchone()
+            if player_row and player_row[0] != game_team_id:
+                cur.execute("UPDATE players SET team_id = %s WHERE player_id = %s", (game_team_id, player_id))
         
         print(f"  Updated game {game_id}")
     

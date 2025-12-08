@@ -99,7 +99,30 @@ def run_daily_pipeline():
     if result.stderr:
         print("ERROR:", result.stderr)
     
-    print("\nSTEP 8: Collect today's schedule")
+    print("\nSTEP 8: Detect and update player transactions (trades, signings, waivers)")
+    print("-"*50)
+    result = subprocess.run([
+        sys.executable,
+        '../data_collection/detect_and_update_trades.py',
+        str(today)
+    ], capture_output=True, text=True)
+    print(result.stdout)
+    if result.stderr:
+        print("ERROR:", result.stderr)
+    
+    print("\nSTEP 8b: Update player teams from recent game data (backup)")
+    print("-"*50)
+    result = subprocess.run([
+        sys.executable,
+        '../data_collection/detect_and_update_trades.py',
+        str(today),
+        '--from-games'
+    ], capture_output=True, text=True)
+    print(result.stdout)
+    if result.stderr:
+        print("ERROR:", result.stderr)
+    
+    print("\nSTEP 9: Collect today's schedule")
     print("-"*50)
     result = subprocess.run([
         sys.executable,
@@ -110,7 +133,7 @@ def run_daily_pipeline():
     if result.stderr:
         print("ERROR:", result.stderr)
     
-    print("\nSTEP 9: Generate predictions for today (all models)")
+    print("\nSTEP 10: Generate predictions for today (all models)")
     print("-"*50)
     result = subprocess.run([
         sys.executable,
@@ -122,7 +145,7 @@ def run_daily_pipeline():
     if result.stderr:
         print("ERROR:", result.stderr)
     
-    print("\nSTEP 10: Evaluate yesterday's predictions")
+    print("\nSTEP 11: Evaluate yesterday's predictions")
     print("-"*50)
     result = subprocess.run([
         sys.executable,

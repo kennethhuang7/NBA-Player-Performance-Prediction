@@ -11,45 +11,194 @@ import warnings
 warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy')
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-def calculate_confidence(features_df, recent_games_df):
+def calculate_confidence(features_df, recent_games_df, conn=None, player_id=None, target_date=None, season=None):
     score = 0
     
+    season_cv_score = 0
+    career_cv_score = 0
     if len(recent_games_df) >= 5:
         points_std = recent_games_df['points'].std()
         points_mean = recent_games_df['points'].mean()
         if points_mean > 0:
             cv = points_std / points_mean
-            score += max(0, 30 - (cv * 60))
+            season_cv_score = max(0, 30 - (cv * 60))
         else:
-            score += 15
+            season_cv_score = 15
     else:
-        score += 10
+        season_cv_score = 10
     
-    required = ['points_l5', 'points_l10', 'is_home', 'days_rest', 
-                'offensive_rating_team', 'defensive_rating_opp']
-    available = sum(1 for feat in required 
+    if conn and player_id:
+        try:
+            career_query = f"""
+                SELECT pgs.points
+                FROM player_game_stats pgs
+                JOIN games g ON pgs.game_id = g.game_id
+                WHERE pgs.player_id = {player_id}
+                AND g.game_status = 'completed'
+                AND g.game_date < '{target_date}'
+                ORDER BY g.game_date DESC
+                LIMIT 100
+            """
+            career_games = pd.read_sql(career_query, conn)
+            
+            if len(career_games) >= 20:
+                career_std = career_games['points'].std()
+                career_mean = career_games['points'].mean()
+                if career_mean > 0:
+                    career_cv = career_std / career_mean
+                    career_cv_score = max(0, 30 - (career_cv * 60))
+                else:
+                    career_cv_score = 15
+            else:
+                career_cv_score = season_cv_score
+        except:
+            career_cv_score = season_cv_score
+    
+    score += (season_cv_score * 0.75) + (career_cv_score * 0.25)
+    expected_features = [
+        'is_playoff', 
+        'points_l5', 'rebounds_total_l5', 'assists_l5',
+        'points_l10', 'rebounds_total_l10', 'assists_l10',
+        'points_l20', 'rebounds_total_l20', 'assists_l20',
+        'points_l5_weighted', 'rebounds_total_l5_weighted', 'assists_l5_weighted',
+        'points_l10_weighted', 'rebounds_total_l10_weighted', 'assists_l10_weighted',
+        'points_l20_weighted', 'rebounds_total_l20_weighted', 'assists_l20_weighted',
+        'star_teammate_out', 'star_teammate_ppg', 'games_without_star',  
+        'playoff_games_career', 'playoff_performance_boost',
+        'is_home', 'days_rest', 'is_back_to_back', 'games_played_season',
+        'offensive_rating_team', 'defensive_rating_team', 'pace_team',
+        'offensive_rating_opp', 'defensive_rating_opp', 'pace_opp',
+        'opp_field_goal_pct', 'opp_three_point_pct',
+        'opp_points_allowed_to_position', 'opp_rebounds_allowed_to_position',
+        'opp_assists_allowed_to_position', 'opp_steals_allowed_to_position',
+        'opp_blocks_allowed_to_position', 'opp_turnovers_forced_to_position',
+        'opp_three_pointers_allowed_to_position',
+        'arena_altitude', 'altitude_away'
+    ]
+    
+    available = sum(1 for feat in expected_features 
                    if feat in features_df.columns 
                    and not pd.isna(features_df[feat].iloc[0]))
-    score += (available / len(required)) * 20
+    score += (available / len(expected_features)) * 20
     
-    games = len(recent_games_df)
-    if games >= 20:
-        score += 25
-    elif games >= 10:
-        score += 20
-    elif games >= 5:
-        score += 15
+    season_games = len(recent_games_df)
+    coming_off_injury = False
+    games_missed = 0
+    if conn and player_id and target_date:
+        try:
+            injury_check = pd.read_sql(f"""
+                SELECT games_missed, return_date, 
+                       report_date as injury_start_date
+                FROM injuries
+                WHERE player_id = {player_id}
+                AND return_date IS NOT NULL
+                AND return_date >= %s::date - INTERVAL '60 days'
+                AND return_date <= %s::date
+                ORDER BY return_date DESC
+                LIMIT 1
+            """, conn, params=(target_date, target_date))
+            
+            if len(injury_check) > 0:
+                days_since_return = (pd.to_datetime(target_date) - pd.to_datetime(injury_check.iloc[0]['return_date'])).days
+                games_missed = injury_check.iloc[0]['games_missed'] or 0
+                if days_since_return <= 30 and games_missed >= 5:
+                    coming_off_injury = True
+        except:
+            pass
+    
+    career_games_count = 0
+    if conn and player_id:
+        try:
+            career_count_query = f"""
+                SELECT COUNT(*) as career_games
+                FROM player_game_stats pgs
+                JOIN games g ON pgs.game_id = g.game_id
+                WHERE pgs.player_id = {player_id}
+                AND g.game_status = 'completed'
+                AND g.game_date < '{target_date}'
+            """
+            career_count = pd.read_sql(career_count_query, conn)
+            career_games_count = career_count.iloc[0]['career_games'] if len(career_count) > 0 else 0
+        except:
+            career_games_count = season_games
+    
+    if season_games >= 20:
+        season_score = 25
+    elif season_games >= 10:
+        season_score = 20
+    elif season_games >= 5:
+        season_score = 15
     else:
-        score += 10
+        season_score = 10
     
-    context = 25
-    if 'is_back_to_back' in features_df.columns and features_df['is_back_to_back'].iloc[0] == 1:
-        context -= 5
-    if 'star_teammate_out' in features_df.columns and features_df['star_teammate_out'].iloc[0] == 1:
-        context -= 5
-    if 'altitude_away' in features_df.columns and features_df['altitude_away'].iloc[0] == 1:
-        context -= 3
-    score += max(0, context)
+    deductions = 0
+    
+    if career_games_count < 20:
+        deductions += 10
+    elif career_games_count < 50:
+        deductions += 5
+    
+    if season_games < 5:
+        if coming_off_injury:
+            if games_missed >= 20:
+                deductions += 8
+            elif games_missed >= 10:
+                deductions += 5
+            else:
+                deductions += 3
+        else:
+            deductions += 2
+    elif season_games < 10:
+        if coming_off_injury:
+            deductions += 3
+        else:
+            deductions += 1
+    
+    score += max(0, season_score - deductions)
+    
+    transaction_score = 25
+    
+    if conn and player_id and target_date and season:
+        try:
+            transaction_check = pd.read_sql(f"""
+                SELECT transaction_date, to_team_id, transaction_type
+                FROM player_transactions
+                WHERE player_id = {player_id}
+                AND transaction_type IN ('trade', 'signing')
+                AND transaction_date >= %s::date - INTERVAL '30 days'
+                AND transaction_date <= %s::date
+                ORDER BY transaction_date DESC
+                LIMIT 1
+            """, conn, params=(target_date, target_date))
+            
+            if len(transaction_check) > 0:
+                trans_date = transaction_check.iloc[0]['transaction_date']
+                trans_type = transaction_check.iloc[0]['transaction_type']
+                days_since_trans = (pd.to_datetime(target_date) - pd.to_datetime(trans_date)).days
+                
+                if trans_type == 'trade':
+                    if days_since_trans <= 7:
+                        transaction_score -= 15
+                    elif days_since_trans <= 14:
+                        transaction_score -= 10
+                    elif days_since_trans <= 21:
+                        transaction_score -= 5
+                elif trans_type == 'signing':
+                    if days_since_trans <= 7:
+                        transaction_score -= 12
+                    elif days_since_trans <= 14:
+                        transaction_score -= 8
+                    elif days_since_trans <= 21:
+                        transaction_score -= 4
+        except Exception as e:
+            pass
+    
+    if 'games_played_season' in features_df.columns:
+        games_with_team = features_df['games_played_season'].iloc[0] if not pd.isna(features_df['games_played_season'].iloc[0]) else season_games
+        if games_with_team < 3 and season_games >= 5:
+            transaction_score -= 8
+    
+    score += max(0, transaction_score)
     
     return int(max(0, min(100, score)))
 
@@ -172,7 +321,50 @@ def predict_upcoming_games(target_date=None, model_type='xgboost'):
                     )
             """
             
+            newly_traded_query = f"""
+                SELECT DISTINCT p.player_id
+                FROM players p
+                WHERE p.team_id = {team_id}
+                    AND p.is_active = TRUE
+                    AND p.player_id NOT IN (
+                        SELECT DISTINCT pgs.player_id
+                        FROM player_game_stats pgs
+                        WHERE pgs.team_id = {team_id}
+                            AND pgs.game_id IN (
+                                SELECT game_id FROM games 
+                                WHERE season = '{season}' 
+                                AND game_date < '{target_date}'
+                                AND (home_team_id = {team_id} OR away_team_id = {team_id})
+                                ORDER BY game_date DESC
+                                LIMIT 10
+                            )
+                    )
+                    AND p.player_id NOT IN (
+                        SELECT DISTINCT i.player_id
+                        FROM injuries i
+                        WHERE i.injury_status = 'Out'
+                        AND i.report_date <= '{target_date}'
+                        AND (i.return_date IS NULL OR i.return_date > '{target_date}')
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM player_game_stats pgs2
+                        JOIN games g2 ON pgs2.game_id = g2.game_id
+                        WHERE pgs2.player_id = p.player_id
+                        AND g2.season = '{season}'
+                        AND g2.game_date < '{target_date}'
+                        AND g2.game_status = 'completed'
+                        GROUP BY pgs2.player_id
+                        HAVING COUNT(*) >= 5
+                    )
+            """
+            
             players = pd.read_sql(players_query, conn)
+            newly_traded = pd.read_sql(newly_traded_query, conn)
+            
+            if len(newly_traded) > 0:
+                print(f"    Found {len(newly_traded)} newly traded players (no games with new team yet)")
+                players = pd.concat([players, newly_traded]).drop_duplicates(subset=['player_id'])
             
             print(f"    Found {len(players)} qualifying players (injured players excluded)")
             
@@ -233,7 +425,11 @@ def predict_upcoming_games(target_date=None, model_type='xgboost'):
                         print(f"Warning: Error predicting {stat_name} with {model_type}: {e}")
                         predictions[stat_name] = 0.0
                 
-                confidence_score = calculate_confidence(features, recent_games)
+                confidence_score = calculate_confidence(
+                    features, recent_games, 
+                    conn=conn, player_id=player_id, 
+                    target_date=target_date, season=season
+                )
                 
                 try:
                     conn, cur = ensure_connection(conn, cur)
@@ -341,6 +537,7 @@ def build_features_for_player(conn, player_id, team_id, opponent_id,
         WHERE pgs.player_id = {player_id}
             AND g.game_date < '{target_date}'
             AND g.game_status = 'completed'
+            AND g.season = '{season}'
         ORDER BY g.game_date DESC
         LIMIT 20
     """

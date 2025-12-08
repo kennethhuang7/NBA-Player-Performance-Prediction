@@ -380,23 +380,64 @@ def main():
     st.markdown("### Confidence Score")
     st.markdown("""
     <div class="info-card">
-        <p>The confidence score (0-100%) indicates prediction reliability based on:</p>
+        <p>The confidence score (0-100%) tells you how reliable a prediction is. Think of it as our "certainty level" - 
+        higher scores mean we're more confident the prediction will be accurate. The score is calculated from four main factors:</p>
+        
+        <h4 style="color: #d4af37; margin-top: 1rem; margin-bottom: 0.5rem;">1. Player Consistency (How Predictable They Are)</h4>
+        <p>We look at how consistent a player's performance has been. A player who scores 20-22 points every game is much easier 
+        to predict than someone who scores anywhere from 10 to 30 points. We consider both:</p>
+        <ul style="color: #ccc; line-height: 1.8; margin-left: 1.5rem;">
+            <li><strong>Current season performance (75% weight):</strong> How consistent they've been this year</li>
+            <li><strong>Career performance (25% weight):</strong> Their overall career consistency</li>
+        </ul>
+        <p style="margin-top: 0.5rem;"><strong>Example:</strong> A player averaging 20 points with very little variation gets a high consistency score. 
+        A player averaging 20 points but sometimes scoring 5 and sometimes 35 gets a lower score.</p>
+        
+        <h4 style="color: #d4af37; margin-top: 1rem; margin-bottom: 0.5rem;">2. Data Completeness (Do We Have All The Information?)</h4>
+        <p>Our models use about 40 different pieces of information to make predictions - things like recent form, opponent strength, 
+        team ratings, and more. If we're missing important data (like recent games, opponent stats, or team information), our confidence 
+        goes down because we're making predictions with incomplete information.</p>
+        <p style="margin-top: 0.5rem;"><strong>Example:</strong> If a player just returned from injury and we only have 2 recent games, 
+        we have less data to work with, so confidence is lower.</p>
+        
+        <h4 style="color: #d4af37; margin-top: 1rem; margin-bottom: 0.5rem;">3. Experience & Sample Size (How Much History Do We Have?)</h4>
+        <p>More games played means more reliable patterns. We look at both:</p>
+        <ul style="color: #ccc; line-height: 1.8; margin-left: 1.5rem;">
+            <li><strong>Season games:</strong> How many games they've played this season (20+ is ideal, 10+ is good, 5+ is okay)</li>
+            <li><strong>Career games:</strong> Their total career experience (50+ is ideal, 20+ is good)</li>
+        </ul>
+        <p style="margin-top: 0.5rem;">We also check if a player is coming back from injury. If they recently returned after missing many games, 
+        we're less confident because their performance might still be adjusting.</p>
+        <p style="margin-top: 0.5rem;"><strong>Example:</strong> A veteran with 500 career games and 50 games this season gets a high score. 
+        A rookie with 10 career games gets a lower score. A player who just returned from a 20-game injury absence gets an additional deduction.</p>
+        
+        <h4 style="color: #d4af37; margin-top: 1rem; margin-bottom: 0.5rem;">4. Recent Trades (Team Changes Create Uncertainty)</h4>
+        <p>When a player is traded to a new team, there's uncertainty about how they'll perform in a new system, with new teammates, 
+        and potentially a different role. We reduce confidence based on how recently the trade happened:</p>
+        <ul style="color: #ccc; line-height: 1.8; margin-left: 1.5rem;">
+            <li><strong>Traded within last 7 days:</strong> Major confidence reduction (15 points) - very uncertain</li>
+            <li><strong>Traded 8-14 days ago:</strong> Moderate reduction (10 points) - still adjusting</li>
+            <li><strong>Traded 15-21 days ago:</strong> Small reduction (5 points) - some uncertainty remains</li>
+            <li><strong>Traded 22+ days ago:</strong> Minimal or no reduction - player has had time to adjust</li>
+        </ul>
+        <p style="margin-top: 0.5rem;">We also check if a player has played very few games with their current team (even if we don't have a trade record). 
+        If they have less than 3 games with their current team but have played 5+ games overall this season, it suggests they might be new to the team.</p>
+        <p style="margin-top: 0.5rem;"><strong>Example:</strong> A player traded 3 days ago gets a significant confidence reduction. 
+        A player traded 25 days ago with 8 games under their belt gets little to no penalty.</p>
+        
+        <h4 style="color: #d4af37; margin-top: 1.5rem; margin-bottom: 0.5rem;">How to Interpret Confidence Scores:</h4>
         <ul style="color: #ccc; line-height: 1.8;">
-            <li><strong style="color: #d4af37;">Player's recent game history and consistency:</strong> Lower variance = higher confidence. 
-            A player who consistently scores 20-22 points is more predictable than one who scores 10-30 points.</li>
-            <li><strong style="color: #d4af37;">Availability of required features:</strong> Missing data reduces confidence. 
-            If we don't have recent game data, we're less confident.</li>
-            <li><strong style="color: #d4af37;">Number of games played in the season:</strong> More games = more reliable patterns. 
-            A rookie with 5 games is harder to predict than a veteran with 50 games.</li>
-            <li><strong style="color: #d4af37;">Contextual factors:</strong> Back-to-back games, injuries, altitude reduce confidence 
-            because they introduce uncertainty.</li>
+            <li><strong style="color: #4ade80;">80-100%:</strong> High confidence - very reliable prediction. Player is consistent, 
+            we have complete data, and there are no major uncertainties.</li>
+            <li><strong style="color: #fbbf24;">60-79%:</strong> Medium confidence - generally reliable. Prediction should be reasonably accurate, 
+            but there may be some factors creating uncertainty.</li>
+            <li><strong style="color: #f87171;">Below 60%:</strong> Low confidence - use with caution. The player may be inconsistent, 
+            we're missing data, they're inexperienced, recently traded, or coming off injury. Predictions are less reliable.</li>
         </ul>
-        <p><strong>How to interpret:</strong></p>
-        <ul style="color: #ccc;">
-            <li><strong style="color: #4ade80;">80-100%:</strong> High confidence - very reliable prediction</li>
-            <li><strong style="color: #fbbf24;">60-79%:</strong> Medium confidence - generally reliable</li>
-            <li><strong style="color: #f87171;">Below 60%:</strong> Low confidence - use with caution</li>
-        </ul>
+        
+        <p style="margin-top: 1rem; color: #888; font-style: italic;"><strong>Remember:</strong> Confidence scores don't tell you if a prediction 
+        will be high or low - they tell you how reliable we think the prediction is. A low confidence score on a 25-point prediction means we're 
+        less certain it will be accurate, not that we think they'll score less.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -446,12 +487,22 @@ def main():
     st.markdown("""
     <div class="info-card">
         <ul style="color: #ccc; line-height: 1.8;">
-            <li><strong style="color: #d4af37;">Historical data only:</strong> Models are trained on past performance and may not account for sudden changes (trades, coaching changes, etc.)</li>
-            <li><strong style="color: #d4af37;">Injury updates:</strong> While we track injuries, last-minute lineup changes may not be reflected in same-day predictions</li>
-            <li><strong style="color: #d4af37;">Minutes played:</strong> Our models predict stats assuming normal playing time. Unexpected benchings or foul trouble aren't predicted</li>
-            <li><strong style="color: #d4af37;">Playoff vs Regular Season:</strong> Playoff predictions use additional features, but playoff basketball can be more unpredictable</li>
-            <li><strong style="color: #d4af37;">Rookies and new players:</strong> Limited historical data means lower confidence scores and potentially less accurate predictions</li>
-            <li><strong style="color: #d4af37;">Statistical variance:</strong> Basketball has inherent randomness. Even perfect models can't predict every game perfectly</li>
+            <li><strong style="color: #d4af37;">Historical data only:</strong> Models are trained on past performance and may not account for sudden changes 
+            (coaching changes, role changes, etc.). However, we do account for trades by reducing confidence scores for recently traded players.</li>
+            <li><strong style="color: #d4af37;">Injury updates:</strong> While we track injuries and update our database daily, last-minute lineup changes 
+            (announced hours before game time) may not be reflected in same-day predictions. Players returning from injury will have lower confidence scores 
+            until they've played several games.</li>
+            <li><strong style="color: #d4af37;">Minutes played:</strong> Our models predict stats assuming normal playing time. Unexpected benchings, 
+            foul trouble, or blowout games (where starters sit in the 4th quarter) aren't predicted and can affect accuracy.</li>
+            <li><strong style="color: #d4af37;">Playoff vs Regular Season:</strong> Playoff predictions use additional features (playoff experience, 
+            playoff performance history), but playoff basketball can be more unpredictable due to increased intensity and strategic adjustments.</li>
+            <li><strong style="color: #d4af37;">Rookies and new players:</strong> Limited historical data means lower confidence scores and potentially 
+            less accurate predictions. The system accounts for this by reducing confidence for players with fewer career games.</li>
+            <li><strong style="color: #d4af37;">Recently traded players:</strong> While we detect trades and adjust confidence scores accordingly, 
+            it takes time for players to adjust to new teams. Predictions for players traded within the last 2-3 weeks may be less accurate 
+            as they adapt to new systems and roles.</li>
+            <li><strong style="color: #d4af37;">Statistical variance:</strong> Basketball has inherent randomness. Even perfect models can't predict 
+            every game perfectly. A player might have an off night, get in foul trouble early, or have an unexpectedly great game.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)

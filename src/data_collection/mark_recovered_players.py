@@ -19,10 +19,13 @@ def mark_recovered_players(target_date=None):
     
     cur.execute("""
         SELECT DISTINCT ON (i.player_id) 
-            i.injury_id, i.player_id, p.full_name, i.report_date, i.injury_status
+            i.injury_id, i.player_id, p.full_name, 
+            i.report_date as injury_start_date, 
+            i.injury_status
         FROM injuries i
         JOIN players p ON i.player_id = p.player_id
         WHERE i.injury_status IN ('Out', 'Day-To-Day', 'Questionable')
+        AND i.report_date IS NOT NULL
         ORDER BY i.player_id, i.report_date DESC, i.injury_id DESC
     """)
     
@@ -39,7 +42,7 @@ def mark_recovered_players(target_date=None):
     recovered = 0
     still_injured = 0
     
-    for injury_id, player_id, player_name, injury_date, injury_status in injured_players:
+    for injury_id, player_id, player_name, injury_start_date, injury_status in injured_players:
         cur.execute("""
             SELECT COUNT(*) 
             FROM player_game_stats pgs
@@ -52,7 +55,7 @@ def mark_recovered_players(target_date=None):
         
         played = cur.fetchone()[0]
         
-        if played > 0:
+        if played > 0 and injury_start_date < target_date:
             cur.execute("""
                 SELECT COUNT(DISTINCT g.game_date)
                 FROM games g
@@ -61,7 +64,13 @@ def mark_recovered_players(target_date=None):
                 AND g.game_status = 'completed'
                 AND (g.home_team_id IN (SELECT team_id FROM players WHERE player_id = %s)
                      OR g.away_team_id IN (SELECT team_id FROM players WHERE player_id = %s))
-            """, (injury_date, target_date, player_id, player_id))
+                AND NOT EXISTS (
+                    SELECT 1 FROM player_game_stats pgs2
+                    WHERE pgs2.game_id = g.game_id
+                    AND pgs2.player_id = %s
+                    AND pgs2.minutes_played > 0
+                )
+            """, (injury_start_date, target_date, player_id, player_id, player_id))
             
             games_missed = cur.fetchone()[0]
             
